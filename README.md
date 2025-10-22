@@ -1,17 +1,34 @@
-## Foundry
+# TrovePilot
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+**Permissionless liquidation & redemption automation for Mezo MUSD**
 
-Foundry consists of:
+TrovePilot is a composable automation layer for the Mezo stablecoin ecosystem.  
+It provides:
+- **LiquidationBatcher** — executes batch liquidations and forwards protocol rewards to the caller.  
+- **RedemptionRouter** — on-chain hint computation and “quick mode” for small redemptions.  
+- **KeeperRegistry** — minimal registry + scoring to enable an open keeper economy.
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+> Built for the **Advanced DeFi Solutions** track of the **Mezo Hackathon 2025**.
 
-## Documentation
+---
 
-https://book.getfoundry.sh/
+## Why TrovePilot?
+
+- Makes **peg-defense participation accessible** — no bespoke bots or servers required.  
+- Codifies **hinted redemptions & batch liquidations** into reusable on-chain modules.  
+- Creates an **open keeper economy** with optional fee-sharing and transparent reputation.  
+
+---
+
+## Quick Start
+
+### Install Foundry and Forge: [installation guide](https://book.getfoundry.sh/getting-started/installation)
+
+```bash
+forge install
+cp .env.example .env   # set MEZO_RPC & PRIVATE_KEY
+forge build
+```
 
 ## Usage
 
@@ -27,40 +44,13 @@ $ forge build
 $ forge test
 ```
 
-### Format
+## Motivation
 
-```shell
-$ forge fmt
-```
+MUSD’s stability depends on timely liquidations and redemptions, but running private keepers is complex.
+TrovePilot brings these core mechanisms on-chain and permissionless, ensuring everyone can participate in peg maintenance, earn keeper rewards, and improve Mezo’s decentralization.
 
-### Gas Snapshots
+---
 
-```shell
-$ forge snapshot
-```
+## License
 
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+MIT

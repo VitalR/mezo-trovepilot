@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { ITroveManager } from "./interfaces/ITroveManager.sol";
 
@@ -14,7 +15,7 @@ import { ITroveManager } from "./interfaces/ITroveManager.sol";
 /// - Forwards protocol rewards (e.g., 200 MUSD gas deposit + 0.5% collateral to liquidator) to the caller, minus
 /// optional fee. - Designed to be called by anyone (humans or bots). No privileged keeper is required.
 /// - Uses a minimal "owner" for parameter updates (fee, sinks, registry); no proxy pattern here.
-contract LiquidationBatcher is Ownable2Step {
+contract LiquidationBatcher is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // =============================================================
@@ -135,7 +136,11 @@ contract LiquidationBatcher is Ownable2Step {
     /// @param troves   Borrower addresses targeted for liquidation.
     /// @param maxCount Optional cap (0 = use full array).
     /// @return executed Number of successful liquidations.
-    function batchLiquidate(address[] calldata troves, uint256 maxCount) external returns (uint256 executed) {
+    function batchLiquidate(address[] calldata troves, uint256 maxCount)
+        external
+        nonReentrant
+        returns (uint256 executed)
+    {
         uint256 startGas = gasleft();
         uint256 n = troves.length;
         if (n == 0) revert EmptyInput();
@@ -151,8 +156,7 @@ contract LiquidationBatcher is Ownable2Step {
                     unchecked {
                         ++executed;
                     }
-                } catch { /* skip non-liquidatable */
-                    }
+                } catch { /* skip non-liquidatable */ }
             }
         }
 
@@ -181,6 +185,7 @@ contract LiquidationBatcher is Ownable2Step {
                 (bool ok,) = _to.call{ value: toSend }("");
                 ok; // ignore
             }
+            nativeNet = nativeBal - feeNative;
         }
 
         // ---- MUSD (gas deposit) ----
@@ -196,7 +201,10 @@ contract LiquidationBatcher is Ownable2Step {
             }
         }
 
-        if (nativeBal == 0 && musdOut == 0) revert NothingToForward();
+        if (nativeBal == 0 && musdOut == 0) {
+            emit RewardsForwarded(_to, 0, 0, feeBps);
+            return;
+        }
         emit RewardsForwarded(_to, nativeBal, musdOut, feeBps);
     }
 

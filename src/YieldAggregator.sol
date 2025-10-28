@@ -53,22 +53,22 @@ contract YieldAggregator is Ownable2Step {
 
     /// @notice Record a deposit made externally by a trusted notifier.
     /// @dev The notifier must have transferred the tokens to this contract before calling.
-    /// @param user Account to credit inside the aggregator.
-    /// @param amount Amount of MUSD to credit.
-    function notifyDeposit(address user, uint256 amount) external {
+    /// @param _user Account to credit inside the aggregator.
+    /// @param _amount Amount of MUSD to credit.
+    function notifyDeposit(address _user, uint256 _amount) external {
         if (!isNotifier[msg.sender]) revert NotifierOnly();
-        uint256 newBal = balances[user] + amount;
-        balances[user] = newBal;
-        emit Deposited(user, amount, newBal);
+        uint256 newBal = balances[_user] + _amount;
+        balances[_user] = newBal;
+        emit Deposited(_user, _amount, newBal);
     }
 
     /// @notice Withdraw caller's MUSD from the aggregator to caller's wallet.
-    /// @param amount Amount to withdraw.
-    function withdraw(uint256 amount) external {
+    /// @param _amount Amount to withdraw.
+    function withdraw(uint256 _amount) external {
         uint256 bal = balances[msg.sender];
-        if (amount > bal) revert InsufficientBalance();
-        balances[msg.sender] = bal - amount;
-        MUSD.safeTransfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount, balances[msg.sender]);
+        if (_amount > bal) revert InsufficientBalance();
+        balances[msg.sender] = bal - _amount;
+        MUSD.safeTransfer(msg.sender, _amount);
+        emit Withdrawn(msg.sender, _amount, bal - _amount);
     }
 }

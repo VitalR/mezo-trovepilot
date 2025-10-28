@@ -40,12 +40,16 @@ contract VaultManager is Ownable2Step {
         address indexed user, address indexed keeper, uint256 musdRedeemed, uint256 keeperFee, uint256 price
     );
 
+    /// @notice Construct the VaultManager.
+    /// @param _musd   MUSD ERC-20 token address (proxy on Mezo).
+    /// @param _router RedemptionRouter contract used to execute redemptions.
+    /// @param _owner  Owner address for admin actions.
     constructor(address _musd, address _router, address _owner) Ownable(_owner) {
         if (_musd == address(0) || _router == address(0)) revert ZeroAddress();
         MUSD = IERC20(_musd);
         router = RedemptionRouter(_router);
         // pre-approve router for convenience; we manage amounts internally
-        MUSD.safeApprove(address(router), type(uint256).max);
+        MUSD.forceApprove(address(router), type(uint256).max);
     }
 
     /// @notice Set the optional yield aggregator sink. Owner-only.
@@ -54,67 +58,76 @@ contract VaultManager is Ownable2Step {
         aggregator = YieldAggregator(_aggregator);
     }
 
-    function setConfig(uint256 musdPerRedeem, uint256 maxIterations, uint16 keeperFeeBps, bool active) external {
+    /// @notice Configure redemption parameters for the caller.
+    /// @param _musdPerRedeem Exact MUSD to redeem per `execute`.
+    /// @param _maxIterations Max trove traversals for hinted redemption.
+    /// @param _keeperFeeBps  Keeper fee in basis points paid from caller's balance.
+    /// @param _active        Whether automation is enabled for the caller.
+    function setConfig(uint256 _musdPerRedeem, uint256 _maxIterations, uint16 _keeperFeeBps, bool _active) external {
         configs[msg.sender] = Config({
-            musdPerRedeem: musdPerRedeem, maxIterations: maxIterations, keeperFeeBps: keeperFeeBps, active: active
+            musdPerRedeem: _musdPerRedeem, maxIterations: _maxIterations, keeperFeeBps: _keeperFeeBps, active: _active
         });
         emit ConfigUpdated(msg.sender, configs[msg.sender]);
     }
 
-    function fund(uint256 amount) external {
-        MUSD.safeTransferFrom(msg.sender, address(this), amount);
-        balances[msg.sender] += amount;
-        emit Funded(msg.sender, amount, balances[msg.sender]);
+    /// @notice Deposit MUSD into the caller's internal balance used for automation and keeper fees.
+    /// @param _amount MUSD amount to deposit.
+    function fund(uint256 _amount) external {
+        MUSD.safeTransferFrom(msg.sender, address(this), _amount);
+        balances[msg.sender] += _amount;
+        emit Funded(msg.sender, _amount, balances[msg.sender]);
     }
 
-    function withdraw(uint256 amount) external {
+    /// @notice Withdraw MUSD from the caller's internal balance back to their wallet.
+    /// @param _amount MUSD amount to withdraw.
+    function withdraw(uint256 _amount) external {
         uint256 bal = balances[msg.sender];
-        if (amount > bal) revert InsufficientBalance();
-        balances[msg.sender] = bal - amount;
-        MUSD.safeTransfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount, balances[msg.sender]);
+        if (_amount > bal) revert InsufficientBalance();
+        balances[msg.sender] = bal - _amount;
+        MUSD.safeTransfer(msg.sender, _amount);
+        emit Withdrawn(msg.sender, _amount, balances[msg.sender]);
     }
 
-    /// @notice Deposit a portion of user's internal balance to the aggregator on their behalf.
-    /// @dev Anyone can trigger this if the user has balance and aggregator is set; good for automation.
-    /// @param user Target user whose internal balance is used.
-    /// @param amount MUSD amount to deposit.
-    function autoDeposit(address user, uint256 amount) external {
+    /// @notice Deposit a portion of a user's internal balance to the aggregator on their behalf.
+    /// @dev Anyone can trigger this if the user has balance and an aggregator is set.
+    /// @param _user   Target user whose internal balance is used.
+    /// @param _amount MUSD amount to deposit.
+    function autoDeposit(address _user, uint256 _amount) external {
         YieldAggregator agg = aggregator;
         if (address(agg) == address(0)) revert ZeroAddress();
-        uint256 bal = balances[user];
-        if (amount > bal) revert InsufficientBalance();
-        balances[user] = bal - amount;
+        uint256 bal = balances[_user];
+        if (_amount > bal) revert InsufficientBalance();
+        balances[_user] = bal - _amount;
         // move funds to aggregator and credit the user
-        MUSD.safeTransfer(address(agg), amount);
-        agg.notifyDeposit(user, amount);
+        MUSD.safeTransfer(address(agg), _amount);
+        agg.notifyDeposit(_user, _amount);
     }
 
-    /// @notice Execute user's configured redemption using their pre-funded MUSD and pay keeper fee from balance.
-    /// @param user Target user who opted-in and funded the contract
-    /// @param price System price for redemption hint computation (same source as protocol)
-    function execute(address user, uint256 price) external {
-        Config memory cfg = configs[user];
+    /// @notice Execute a user's configured redemption using their pre-funded MUSD and pay the keeper fee from balance.
+    /// @param _user  Target user who opted-in and funded the contract.
+    /// @param _price System price for redemption hint computation (must match protocol source).
+    function execute(address _user, uint256 _price) external {
+        Config memory cfg = configs[_user];
         if (!cfg.active) revert Inactive();
 
         // total required = redeem amount + keeper fee in MUSD
         uint256 keeperFee = (cfg.musdPerRedeem * cfg.keeperFeeBps) / 10_000;
         uint256 total = cfg.musdPerRedeem + keeperFee;
-        if (balances[user] < total) revert InsufficientBalance();
+        if (balances[_user] < total) revert InsufficientBalance();
 
         // Spend user's MUSD held by this contract to redeem on their behalf
         // This contract is the caller to router; router will burn MUSD from this contract
-        router.redeemExact(cfg.musdPerRedeem, price, cfg.maxIterations);
+        router.redeemExact(cfg.musdPerRedeem, _price, cfg.maxIterations);
 
         // Account and pay keeper in MUSD
         unchecked {
-            balances[user] -= total;
+            balances[_user] -= total;
         }
         if (keeperFee != 0) {
             MUSD.safeTransfer(msg.sender, keeperFee);
         }
 
-        emit Executed(user, msg.sender, cfg.musdPerRedeem, keeperFee, price);
+        emit Executed(_user, msg.sender, cfg.musdPerRedeem, keeperFee, _price);
     }
 }
 

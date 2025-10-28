@@ -1,15 +1,18 @@
 # ========= Mezo TrovePilot – Makefile =========
 # Usage examples:
 #   make help
-#   make build
-#   make test
+#   make update build test snapshot coverage
 #   make test MATCH=Redeem_UsingRealUserBalance
-#   make test-fork MATCH=TrovePilotIntegrationTest -- runs with MEZO fork
-#   make deploy-testnet
-#   make verify-address ADDR=0x... CONTRACT=src/RedemptionRouter.sol:RedemptionRouter
+#   make test-fork MATCH=TrovePilotLocalIntegrationTest  # runs with MEZO fork
+#   make deploy-testnet  # deploy + verify on testnet
+#   make demo-testnet    # run e2e demo script on testnet
+#   make verify-address ADDR=0x... CONTRACT=src/File.sol:Name
 # ==============================================
 
 SHELL := /usr/bin/env bash
+
+# Auto-load env if present (does not fail if missing)
+-include .env
 
 # --- Config ---
 ENV_FILE       ?= .env.testnet           # contains MEZO_RPC and DEPLOYER_PRIVATE_KEY
@@ -27,7 +30,7 @@ MATCH          ?=
 env = set -euo pipefail; source $(ENV_FILE);
 
 # --- Meta ---
-.PHONY: help
+.PHONY: help install update build clean fmt fmt-check test test-fork deploy-testnet demo-testnet verify-address verify-router verify-engine check-env
 help:
 	@echo ""
 	@echo "TrovePilot – common tasks"
@@ -37,65 +40,38 @@ help:
 	@echo "make clean                  # clean artifacts"
 	@echo "make fmt                    # auto-format"
 	@echo "make fmt-check              # format check only"
-	@echo "make snapshot               # gas snapshots"
-	@echo "make coverage               # coverage report"
 	@echo "make test [MATCH=...]       # run tests"
 	@echo "make test-fork [MATCH=...]  # run tests on Mezo fork (needs MEZO_RPC)"
 	@echo "make deploy-testnet         # deploy + verify on Mezo testnet"
+	@echo "make demo-testnet           # run end-to-end demo script on Mezo testnet"
 	@echo "make verify-address ADDR=0x.. CONTRACT=src/File.sol:Name"
 	@echo "make verify-router          # convenience verify for RedemptionRouter (ADDR=...)"
-	@echo "make verify-batcher         # convenience verify for LiquidationBatcher (ADDR=...)"
+	@echo "make verify-engine          # convenience verify for LiquidationEngine (ADDR=...)"
 	@echo ""
 
 # --- Project hygiene ---
-.PHONY: install
 install:
 	forge install
 
-.PHONY: build
 build:
 	forge build -vv
 
-.PHONY: clean
 clean:
 	forge clean
 
-.PHONY: fmt
 fmt:
 	forge fmt
 
-.PHONY: fmt-check
 fmt-check:
 	forge fmt --check
 
-.PHONY: snapshot
-snapshot:
-	forge snapshot -vv
-
-.PHONY: coverage
-coverage:
-	forge coverage -vv
-
 # --- Tests ---
-.PHONY: test
 test:
 	forge test $(if $(MATCH),--match-test "$(MATCH)",) -vvv
 
 # Run tests with live Mezo fork (reads MEZO_RPC from $(ENV_FILE))
-.PHONY: test-fork
 test-fork:
 	@bash -lc '$(env) forge test $(if $(MATCH),--match-test "$(MATCH)",) --fork-url "$$MEZO_RPC" -vvv'
-
-# Handy target for the specific user-balance redeem test from your suite
-.PHONY: test-redeem-user
-test-redeem-user:
-	@bash -lc '$(env) forge test --match-test test_Redeem_UsingRealUserBalance --fork-url "$$MEZO_RPC" -vvv'
-
-# Optional: pin a fork block (override with: make test-fork-at BLOCK=8235732)
-BLOCK ?=
-.PHONY: test-fork-at
-test-fork-at:
-	@bash -lc '$(env) forge test $(if $(MATCH),--match-test "$(MATCH)",) --fork-url "$$MEZO_RPC" $(if $(BLOCK),--fork-block-number $(BLOCK),) -vvv'
 
 # --- Deploy & Verify (Blockscout) ---
 # One-shot deploy + verify (uses $(ENV_FILE) for MEZO_RPC and DEPLOYER_PRIVATE_KEY)
@@ -105,9 +81,19 @@ deploy-testnet:
 	  --rpc-url "$$MEZO_RPC" \
 	  --private-key "$$DEPLOYER_PRIVATE_KEY" \
 	  --broadcast \
+	  --slow \
 	  --verify \
 	  --verifier blockscout \
 	  --verifier-url "$(BLOCKSCOUT_API)" \
+	  -vvvv'
+
+# Run demo script on testnet (reads addresses from env or deploys minimal fresh ones)
+.PHONY: demo-testnet
+demo-testnet:
+	@bash -lc '$(env) forge script script/TrovePilotDemo.s.sol:TrovePilotDemoScript \
+	  --rpc-url "$$MEZO_RPC" \
+	  --private-key "$$DEPLOYER_PRIVATE_KEY" \
+	  --broadcast \
 	  -vvvv'
 
 # Post-deploy verification helpers
@@ -128,14 +114,14 @@ verify-address:
 	  $(CONTRACT)
 
 # Convenience wrappers (set ADDR=...)
-.PHONY: verify-router verify-batcher
+.PHONY: verify-router verify-engine
 verify-router:
 	@test -n "$(ADDR)" || (echo "ERR: provide ADDR=router_address"; exit 1)
 	$(MAKE) verify-address ADDR=$(ADDR) CONTRACT=src/RedemptionRouter.sol:RedemptionRouter
 
-verify-batcher:
-	@test -n "$(ADDR)" || (echo "ERR: provide ADDR=batcher_address"; exit 1)
-	$(MAKE) verify-address ADDR=$(ADDR) CONTRACT=src/LiquidationBatcher.sol:LiquidationBatcher
+verify-engine:
+	@test -n "$(ADDR)" || (echo "ERR: provide ADDR=engine_address"; exit 1)
+	$(MAKE) verify-address ADDR=$(ADDR) CONTRACT=src/LiquidationEngine.sol:LiquidationEngine
 
 # --- Extras ---
 # Export ABIs for frontend (outputs JSON to ./abi/)
@@ -144,13 +130,16 @@ ABI_OUT ?= abi
 abi:
 	mkdir -p $(ABI_OUT)
 	forge inspect RedemptionRouter abi > $(ABI_OUT)/RedemptionRouter.json
-	forge inspect LiquidationBatcher abi > $(ABI_OUT)/LiquidationBatcher.json
+	forge inspect LiquidationEngine abi > $(ABI_OUT)/LiquidationEngine.json
+	forge inspect VaultManager abi > $(ABI_OUT)/VaultManager.json
+	forge inspect YieldAggregator abi > $(ABI_OUT)/YieldAggregator.json
+	forge inspect KeeperRegistry abi > $(ABI_OUT)/KeeperRegistry.json
 	@echo "ABIs written to $(ABI_OUT)/"
 
-# Encode example (constructor for RedemptionRouter)
-.PHONY: encode-router-ctor
-encode-router-ctor:
-	@cast abi-encode 'constructor(address,address,address)' \
-	  0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0 \
-	  0x4e4cBA3779d56386ED43631b4dCD6d8EacEcBCF6 \
-	  0x722E4D24FD6Ff8b0AC679450F3D91294607268fA | xargs echo "ctor args:"
+# --- Utilities ---
+.PHONY: check-env
+check-env:
+	@bash -lc 'set -euo pipefail; \
+	  if [ ! -f $(ENV_FILE) ]; then echo "WARN: $(ENV_FILE) not found (using shell env)"; fi; \
+	  : $${MEZO_RPC?Need MEZO_RPC}; : $${DEPLOYER_PRIVATE_KEY?Need DEPLOYER_PRIVATE_KEY}; \
+	  echo "Env OK"'

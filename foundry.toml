@@ -2,6 +2,11 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+fs_permissions = [
+    { access = "read", path = "./broadcast" },
+    { access = "read", path = "./deployments" },
+    { access = "write", path = "./deployments" }
+]
 
 solc = "0.8.30"
 optimizer = true

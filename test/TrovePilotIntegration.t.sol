@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import { RedemptionRouter } from "../src/RedemptionRouter.sol";
-import { LiquidationBatcher } from "../src/LiquidationBatcher.sol";
+import { LiquidationEngine } from "../src/LiquidationEngine.sol";
 import { KeeperRegistry } from "../src/KeeperRegistry.sol";
 import { ITroveManager } from "../src/interfaces/ITroveManager.sol";
 
@@ -22,7 +22,7 @@ interface IPriceFeed {
     function fetchPrice() external view returns (uint256);
 }
 
-contract TrovePilotIntegrationTest is Test {
+contract TrovePilotLocalIntegrationTest is Test {
     // === Real Mezo Testnet proxy addresses (as per docs) ===
     address constant TROVE_MANAGER = address(0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0);
     address constant HINT_HELPERS = address(0x4e4cBA3779d56386ED43631b4dCD6d8EacEcBCF6);
@@ -33,7 +33,7 @@ contract TrovePilotIntegrationTest is Test {
     address constant PRICE_FEED = address(0x86bCF0841622a5dAC14A313a15f96A95421b9366);
 
     RedemptionRouter public router;
-    LiquidationBatcher public batcher;
+    LiquidationEngine public engine;
 
     function setUp() public {
         // vm.createSelectFork(vm.envString("MEZO_RPC"));
@@ -42,8 +42,8 @@ contract TrovePilotIntegrationTest is Test {
         router = new RedemptionRouter(TROVE_MANAGER, HINT_HELPERS, SORTED_TROVES);
 
         // Use simple config: owner is this contract, no fee sink
-        batcher = new LiquidationBatcher(TROVE_MANAGER, address(this), address(0), 0);
-        batcher.setMusd(MUSD);
+        engine = new LiquidationEngine(TROVE_MANAGER, address(this), address(0), 0);
+        engine.setMusd(MUSD);
     }
 
     function test_Redeem_UsingRealUserBalance() public {
@@ -134,12 +134,12 @@ contract TrovePilotIntegrationTest is Test {
     //     router.redeemQuick(5e18);
     // }
 
-    function test_LiquidationBatcher_NoRevert_WhenNoRewards() public {
+    function test_LiquidationEngine_NoRevert_WhenNoRewards() public {
         address[] memory troves = new address[](1);
         troves[0] = address(0x1234567890123456789012345678901234567890);
 
         // May execute 0 liquidations; should not revert even if no rewards received
-        uint256 executed = batcher.batchLiquidate(troves, 0);
+        uint256 executed = engine.liquidateRange(troves, 0, troves.length, 0);
         assertTrue(executed >= 0, "Should not revert on empty/invalid set");
     }
 

@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import "forge-std/Script.sol";
 import { RedemptionRouter } from "../src/RedemptionRouter.sol";
-import { LiquidationBatcher } from "../src/LiquidationBatcher.sol";
+import { LiquidationEngine } from "../src/LiquidationEngine.sol";
 import { KeeperRegistry } from "../src/KeeperRegistry.sol";
 import { VaultManager } from "../src/VaultManager.sol";
 import { YieldAggregator } from "../src/YieldAggregator.sol";
@@ -40,9 +40,9 @@ contract TrovePilotDeployScript is Script {
         // 1) RedemptionRouter (stateless)
         RedemptionRouter router = new RedemptionRouter(TROVE_MANAGER, HINT_HELPERS, SORTED_TROVES);
 
-        // 2) LiquidationBatcher
-        LiquidationBatcher batcher = new LiquidationBatcher(TROVE_MANAGER, owner, feeSink, feeBps);
-        batcher.setMusd(MUSD);
+        // 2) LiquidationEngine
+        LiquidationEngine engine = new LiquidationEngine(TROVE_MANAGER, owner, feeSink, feeBps);
+        engine.setMusd(MUSD);
 
         // 3) VaultManager (MVP) + YieldAggregator (stub)
         VaultManager vault = new VaultManager(MUSD, address(router), owner);
@@ -55,10 +55,10 @@ contract TrovePilotDeployScript is Script {
         if (deployRegistry) {
             registry = new KeeperRegistry(owner);
 
-            // Wire the batcher to the registry for scoring and payouts
-            batcher.setKeeperRegistry(address(registry));
-            // Authorize the batcher to bump keeper scores
-            registry.setAuthorizer(address(batcher), true);
+            // Wire the engine to the registry for scoring and payouts
+            engine.setKeeperRegistry(address(registry));
+            // Authorize the engine to bump keeper scores
+            registry.setAuthorizer(address(engine), true);
             string memory csv = vm.envOr("AUTHORIZERS", string(""));
             if (bytes(csv).length > 0) {
                 string[] memory parts = vm.split(csv, ",");
@@ -74,7 +74,7 @@ contract TrovePilotDeployScript is Script {
         // 5) JSON manifest for downstream tooling
         string memory root = "mezo";
         vm.serializeAddress(root, "RedemptionRouter", address(router));
-        vm.serializeAddress(root, "LiquidationBatcher", address(batcher));
+        vm.serializeAddress(root, "LiquidationEngine", address(engine));
         vm.serializeAddress(root, "VaultManager", address(vault));
         vm.serializeAddress(root, "YieldAggregator", address(aggregator));
         if (deployRegistry) vm.serializeAddress(root, "KeeperRegistry", address(registry));
@@ -85,7 +85,7 @@ contract TrovePilotDeployScript is Script {
         console2.log("=== TrovePilot deployed on Mezo Testnet (31611) ===");
         console2.log("Owner:", owner);
         console2.log("RedemptionRouter:", address(router));
-        console2.log("LiquidationBatcher:", address(batcher));
+        console2.log("LiquidationEngine:", address(engine));
         console2.log("VaultManager:", address(vault));
         if (deployRegistry) console2.log("KeeperRegistry:", address(registry));
         console2.log("MUSD:", MUSD);

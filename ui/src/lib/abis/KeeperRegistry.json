@@ -1,0 +1,25 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "keepers",
+      "stateMutability": "view",
+      "inputs": [{ "name": "", "type": "address" }],
+      "outputs": [
+        { "name": "listed", "type": "bool" },
+        { "name": "score", "type": "uint96" },
+        { "name": "payTo", "type": "address" }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "getTopKeepers",
+      "stateMutability": "view",
+      "inputs": [{ "name": "_count", "type": "uint256" }],
+      "outputs": [
+        { "name": "addrs", "type": "address[]" },
+        { "name": "scores", "type": "uint96[]" }
+      ]
+    }
+  ]
+}

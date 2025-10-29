@@ -1,0 +1,66 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "userSnapshot",
+      "stateMutability": "view",
+      "inputs": [{ "name": "_user", "type": "address" }],
+      "outputs": [
+        {
+          "name": "cfg",
+          "type": "tuple",
+          "components": [
+            { "name": "musdPerRedeem", "type": "uint256" },
+            { "name": "maxIterations", "type": "uint256" },
+            { "name": "keeperFeeBps", "type": "uint16" },
+            { "name": "active", "type": "bool" }
+          ]
+        },
+        { "name": "balance", "type": "uint256" }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "balances",
+      "stateMutability": "view",
+      "inputs": [{ "name": "", "type": "address" }],
+      "outputs": [{ "name": "", "type": "uint256" }]
+    },
+    {
+      "type": "function",
+      "name": "setConfig",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "_musdPerRedeem", "type": "uint256" },
+        { "name": "_maxIterations", "type": "uint256" },
+        { "name": "_keeperFeeBps", "type": "uint16" },
+        { "name": "_active", "type": "bool" }
+      ],
+      "outputs": []
+    },
+    {
+      "type": "function",
+      "name": "fund",
+      "stateMutability": "nonpayable",
+      "inputs": [{ "name": "_amount", "type": "uint256" }],
+      "outputs": []
+    },
+    {
+      "type": "function",
+      "name": "withdraw",
+      "stateMutability": "nonpayable",
+      "inputs": [{ "name": "_amount", "type": "uint256" }],
+      "outputs": []
+    },
+    {
+      "type": "function",
+      "name": "execute",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "_user", "type": "address" },
+        { "name": "_price", "type": "uint256" }
+      ],
+      "outputs": []
+    }
+  ]
+}

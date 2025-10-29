@@ -1,0 +1,30 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "jobCounter",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "uint256" }]
+    },
+    {
+      "type": "function",
+      "name": "getRecentJobs",
+      "stateMutability": "view",
+      "inputs": [{ "name": "_n", "type": "uint256" }],
+      "outputs": [
+        {
+          "name": "recent",
+          "type": "tuple[]",
+          "components": [
+            { "name": "keeper", "type": "address" },
+            { "name": "attempted", "type": "uint64" },
+            { "name": "executed", "type": "uint64" },
+            { "name": "timestamp", "type": "uint64" },
+            { "name": "gasUsed", "type": "uint256" }
+          ]
+        }
+      ]
+    }
+  ]
+}

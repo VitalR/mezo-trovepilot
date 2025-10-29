@@ -1,0 +1,18 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "balances",
+      "stateMutability": "view",
+      "inputs": [{ "name": "", "type": "address" }],
+      "outputs": [{ "name": "", "type": "uint256" }]
+    },
+    {
+      "type": "function",
+      "name": "withdraw",
+      "stateMutability": "nonpayable",
+      "inputs": [{ "name": "_amount", "type": "uint256" }],
+      "outputs": []
+    }
+  ]
+}

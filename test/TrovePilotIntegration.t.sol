@@ -2,10 +2,13 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
+import { MezoAddresses } from "../script/MezoAddresses.sol";
 import { RedemptionRouter } from "../src/RedemptionRouter.sol";
 import { LiquidationEngine } from "../src/LiquidationEngine.sol";
 import { KeeperRegistry } from "../src/KeeperRegistry.sol";
 import { ITroveManager } from "../src/interfaces/ITroveManager.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IPriceOracle } from "../src/interfaces/IPriceOracle.sol";
 
 interface IBorrowerOperations {
     function openTrove(uint256 _maxFeePercentage, uint256 _MUSDAmount, address _upperHint, address _lowerHint)
@@ -13,24 +16,15 @@ interface IBorrowerOperations {
         payable;
 }
 
-interface IERC20 {
-    function balanceOf(address) external view returns (uint256);
-    function approve(address spender, uint256 amount) external returns (bool);
-}
-
-interface IPriceFeed {
-    function fetchPrice() external view returns (uint256);
-}
-
 contract TrovePilotLocalIntegrationTest is Test {
     // === Real Mezo Testnet proxy addresses (as per docs) ===
-    address constant TROVE_MANAGER = address(0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0);
-    address constant HINT_HELPERS = address(0x4e4cBA3779d56386ED43631b4dCD6d8EacEcBCF6);
-    address constant SORTED_TROVES = address(0x722E4D24FD6Ff8b0AC679450F3D91294607268fA);
-    address constant BORROWER_OPS = address(0xCdF7028ceAB81fA0C6971208e83fa7872994beE5);
-    address constant MUSD = address(0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503);
+    address constant TROVE_MANAGER = MezoAddresses.TROVE_MANAGER;
+    address constant HINT_HELPERS = MezoAddresses.HINT_HELPERS;
+    address constant SORTED_TROVES = MezoAddresses.SORTED_TROVES;
+    address constant BORROWER_OPS = MezoAddresses.BORROWER_OPERATIONS;
+    address constant MUSD = MezoAddresses.MUSD;
 
-    address constant PRICE_FEED = address(0x86bCF0841622a5dAC14A313a15f96A95421b9366);
+    address constant PRICE_ORACLE_CALLER = MezoAddresses.PRICE_ORACLE_CALLER;
 
     RedemptionRouter public router;
     LiquidationEngine public engine;
@@ -48,7 +42,11 @@ contract TrovePilotLocalIntegrationTest is Test {
 
     function test_Redeem_UsingRealUserBalance() public {
         // Fork at the CLI (or use createSelectFork); we assume you run with --fork-url
-        address user = vm.envAddress("USER"); // set USER=0xYourWallet in .env
+        address user = vm.envOr("USER", address(0));
+        if (user == address(0)) {
+            emit log("USER env not set; skipping live redeem test.");
+            return;
+        }
         uint256 userBal = IERC20(MUSD).balanceOf(user);
         emit log_named_uint("USER MUSD balance", userBal);
 
@@ -60,8 +58,12 @@ contract TrovePilotLocalIntegrationTest is Test {
 
         // price must be active on this block
         uint256 price;
-        try IPriceFeed(PRICE_FEED).fetchPrice() returns (uint256 p) {
-            price = p;
+        try IPriceOracle(PRICE_ORACLE_CALLER).latestRoundData() returns (
+            uint80, int256 answer, uint256, uint256, uint80
+        ) {
+            if (answer > 0) {
+                price = uint256(answer);
+            }
         } catch {
             emit log("PriceFeed inactive on this fork block; skipping live redeem.");
             return;
@@ -93,8 +95,8 @@ contract TrovePilotLocalIntegrationTest is Test {
         deal(MUSD, address(this), 1000e18);
 
         // If the oracle is inactive on this block, skip gracefully
-        try IPriceFeed(PRICE_FEED).fetchPrice() returns (uint256 price) {
-            // Proceed only if price ok (nonzero preferred)
+        try IPriceOracle(PRICE_ORACLE_CALLER).latestRoundData() returns (uint80, int256 ans, uint256, uint256, uint80) {
+            uint256 price = ans > 0 ? uint256(ans) : 0;
             assertGt(price, 0, "price feed returned zero");
 
             IERC20(MUSD).approve(address(router), type(uint256).max);

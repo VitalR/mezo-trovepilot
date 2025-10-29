@@ -94,6 +94,7 @@ demo-testnet:
 	  --rpc-url "$$MEZO_RPC" \
 	  --private-key "$$DEPLOYER_PRIVATE_KEY" \
 	  --broadcast \
+	  --slow \
 	  -vvvv'
 
 # Post-deploy verification helpers

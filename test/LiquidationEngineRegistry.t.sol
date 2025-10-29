@@ -107,5 +107,22 @@ contract LiquidationEngineRegistryTest is Test {
         assertEq(_payTo, payTo, "payTo set");
         assertEq(score, 10, "score bumped");
     }
+
+    function test_GetRecentJobs_ReturnsLatestWindow() public {
+        address[] memory troves = new address[](2);
+        troves[0] = address(0x1);
+        troves[1] = address(0x2);
+
+        vm.prank(keeper);
+        engine.liquidateRange(troves, 0, troves.length, 0);
+
+        vm.prank(keeper);
+        engine.liquidateRange(troves, 0, troves.length, 0);
+
+        LiquidationEngine.JobSummary[] memory recent = engine.getRecentJobs(1);
+        assertEq(recent.length, 1, "one recent job");
+        assertEq(recent[0].attempted, 2, "attempted count");
+        assertGt(recent[0].timestamp, 0, "has timestamp");
+    }
 }
 

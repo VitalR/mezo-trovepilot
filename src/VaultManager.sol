@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 
 import { RedemptionRouter } from "./RedemptionRouter.sol";
 import { YieldAggregator } from "./YieldAggregator.sol";
@@ -12,7 +13,7 @@ import { YieldAggregator } from "./YieldAggregator.sol";
 /// @notice Opt-in helper that lets users pre-fund MUSD and allow any keeper to execute small redemptions
 ///         on their behalf, paying the keeper from the user's balance.
 /// @dev This MVP focuses on enabling demonstrable automation flows for hackathon judging.
-contract VaultManager is Ownable2Step {
+contract VaultManager is Ownable2Step, Pausable {
     using SafeERC20 for IERC20;
 
     error ZeroAddress();
@@ -58,6 +59,16 @@ contract VaultManager is Ownable2Step {
         aggregator = YieldAggregator(_aggregator);
     }
 
+    /// @notice Pause state-mutating operations. Owner-only.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause state-mutating operations. Owner-only.
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     /// @notice Configure redemption parameters for the caller.
     /// @param _musdPerRedeem Exact MUSD to redeem per `execute`.
     /// @param _maxIterations Max trove traversals for hinted redemption.
@@ -72,7 +83,7 @@ contract VaultManager is Ownable2Step {
 
     /// @notice Deposit MUSD into the caller's internal balance used for automation and keeper fees.
     /// @param _amount MUSD amount to deposit.
-    function fund(uint256 _amount) external {
+    function fund(uint256 _amount) external whenNotPaused {
         MUSD.safeTransferFrom(msg.sender, address(this), _amount);
         balances[msg.sender] += _amount;
         emit Funded(msg.sender, _amount, balances[msg.sender]);
@@ -80,7 +91,7 @@ contract VaultManager is Ownable2Step {
 
     /// @notice Withdraw MUSD from the caller's internal balance back to their wallet.
     /// @param _amount MUSD amount to withdraw.
-    function withdraw(uint256 _amount) external {
+    function withdraw(uint256 _amount) external whenNotPaused {
         uint256 bal = balances[msg.sender];
         if (_amount > bal) revert InsufficientBalance();
         balances[msg.sender] = bal - _amount;
@@ -92,7 +103,7 @@ contract VaultManager is Ownable2Step {
     /// @dev Anyone can trigger this if the user has balance and an aggregator is set.
     /// @param _user   Target user whose internal balance is used.
     /// @param _amount MUSD amount to deposit.
-    function autoDeposit(address _user, uint256 _amount) external {
+    function autoDeposit(address _user, uint256 _amount) external whenNotPaused {
         YieldAggregator agg = aggregator;
         if (address(agg) == address(0)) revert ZeroAddress();
         uint256 bal = balances[_user];
@@ -106,7 +117,7 @@ contract VaultManager is Ownable2Step {
     /// @notice Execute a user's configured redemption using their pre-funded MUSD and pay the keeper fee from balance.
     /// @param _user  Target user who opted-in and funded the contract.
     /// @param _price System price for redemption hint computation (must match protocol source).
-    function execute(address _user, uint256 _price) external {
+    function execute(address _user, uint256 _price) external whenNotPaused {
         Config memory cfg = configs[_user];
         if (!cfg.active) revert Inactive();
 
@@ -129,5 +140,13 @@ contract VaultManager is Ownable2Step {
 
         emit Executed(_user, msg.sender, cfg.musdPerRedeem, keeperFee, _price);
     }
-}
 
+    /// @notice View helper to return a user's config and internal balance in one call.
+    /// @param _user The account to query.
+    /// @return cfg The stored `Config` for the user.
+    /// @return balance The internal MUSD balance tracked for the user.
+    function userSnapshot(address _user) external view returns (Config memory cfg, uint256 balance) {
+        cfg = configs[_user];
+        balance = balances[_user];
+    }
+}

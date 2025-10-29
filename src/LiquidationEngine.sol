@@ -277,5 +277,25 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
 
     /// @notice Accept native rewards routed back by the protocol.
     receive() external payable { }
-}
 
+    // =============================================================
+    //                         VIEW HELPERS
+    // =============================================================
+
+    /// @notice Return the most recent job summaries, up to `n` entries.
+    /// @dev Results are ordered from oldest to newest within the returned window.
+    /// @param _n Maximum number of recent jobs to return.
+    /// @return recent Array of `JobSummary` entries.
+    function getRecentJobs(uint256 _n) external view returns (JobSummary[] memory recent) {
+        uint256 total = jobCounter;
+        if (total == 0 || _n == 0) {
+            return new JobSummary[](0);
+        }
+        uint256 count = _n < total ? _n : total;
+        uint256 startId = total - count + 1;
+        recent = new JobSummary[](count);
+        for (uint256 i = 0; i < count; ++i) {
+            recent[i] = jobs[startId + i];
+        }
+    }
+}

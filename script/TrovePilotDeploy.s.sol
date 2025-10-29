@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import "forge-std/Script.sol";
+import { MezoAddresses } from "./MezoAddresses.sol";
 import { RedemptionRouter } from "../src/RedemptionRouter.sol";
 import { LiquidationEngine } from "../src/LiquidationEngine.sol";
 import { KeeperRegistry } from "../src/KeeperRegistry.sol";
@@ -9,11 +10,18 @@ import { VaultManager } from "../src/VaultManager.sol";
 import { YieldAggregator } from "../src/YieldAggregator.sol";
 
 contract TrovePilotDeployScript is Script {
-    // === Mezo Testnet (chain 31611) core addresses ===
-    address constant TROVE_MANAGER = 0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0;
-    address constant HINT_HELPERS = 0x4e4cBA3779d56386ED43631b4dCD6d8EacEcBCF6;
-    address constant SORTED_TROVES = 0x722E4D24FD6Ff8b0AC679450F3D91294607268fA;
-    address constant MUSD = 0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503;
+    // Cached env/config to reduce local vars in run()
+    address public ownerCached;
+    address public feeSinkCached;
+    uint16 public feeBpsCached;
+    bool public deployRegistryCached;
+
+    // Deployed addresses (for logging and manifest)
+    address public deployedRouter;
+    address public deployedEngine;
+    address public deployedVault;
+    address public deployedAggregator;
+    address public deployedRegistry;
 
     function run() external {
         // ========== ENV ==========
@@ -24,70 +32,80 @@ contract TrovePilotDeployScript is Script {
         // DEPLOY_REGISTRY=true/false
 
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address owner = vm.envOr("OWNER", vm.addr(pk));
-        address feeSink = vm.envOr("FEE_SINK", address(0));
-        uint256 feeBpsU = vm.envOr("FEE_BPS", uint256(0));
-        require(feeBpsU <= 1000, "feeBps > 10%");
-        uint16 feeBps = uint16(feeBpsU);
-        bool deployRegistry = vm.envOr("DEPLOY_REGISTRY", false);
-
-        // Guard rails for external deps
-        require(TROVE_MANAGER != address(0), "TROVE_MANAGER zero");
-        require(MUSD != address(0), "MUSD zero");
+        ownerCached = vm.envOr("OWNER", vm.addr(pk));
+        feeSinkCached = vm.envOr("FEE_SINK", address(0));
+        {
+            uint256 feeBpsU = vm.envOr("FEE_BPS", uint256(0));
+            require(feeBpsU <= 1000, "feeBps > 10%");
+            feeBpsCached = uint16(feeBpsU);
+        }
+        deployRegistryCached = vm.envOr("DEPLOY_REGISTRY", false);
 
         vm.startBroadcast(pk);
 
         // 1) RedemptionRouter (stateless)
-        RedemptionRouter router = new RedemptionRouter(TROVE_MANAGER, HINT_HELPERS, SORTED_TROVES);
+        deployedRouter = address(
+            new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS, MezoAddresses.SORTED_TROVES)
+        );
 
         // 2) LiquidationEngine
-        LiquidationEngine engine = new LiquidationEngine(TROVE_MANAGER, owner, feeSink, feeBps);
-        engine.setMusd(MUSD);
+        deployedEngine =
+            address(new LiquidationEngine(MezoAddresses.TROVE_MANAGER, ownerCached, feeSinkCached, feeBpsCached));
+        LiquidationEngine(payable(deployedEngine)).setMusd(MezoAddresses.MUSD);
 
         // 3) VaultManager (MVP) + YieldAggregator (stub)
-        VaultManager vault = new VaultManager(MUSD, address(router), owner);
-        YieldAggregator aggregator = new YieldAggregator(MUSD, owner);
-        aggregator.setNotifier(address(vault), true);
-        vault.setAggregator(address(aggregator));
+        deployedVault = address(new VaultManager(MezoAddresses.MUSD, deployedRouter, ownerCached));
+        deployedAggregator = address(new YieldAggregator(MezoAddresses.MUSD, ownerCached));
+        YieldAggregator(deployedAggregator).setNotifier(deployedVault, true);
+        VaultManager(deployedVault).setAggregator(deployedAggregator);
 
         // 4) (Optional) KeeperRegistry
-        KeeperRegistry registry;
-        if (deployRegistry) {
-            registry = new KeeperRegistry(owner);
-
-            // Wire the engine to the registry for scoring and payouts
-            engine.setKeeperRegistry(address(registry));
-            // Authorize the engine to bump keeper scores
-            registry.setAuthorizer(address(engine), true);
+        if (deployRegistryCached) {
+            deployedRegistry = address(new KeeperRegistry(ownerCached));
+            LiquidationEngine(payable(deployedEngine)).setKeeperRegistry(deployedRegistry);
+            KeeperRegistry(deployedRegistry).setAuthorizer(deployedEngine, true);
             string memory csv = vm.envOr("AUTHORIZERS", string(""));
             if (bytes(csv).length > 0) {
                 string[] memory parts = vm.split(csv, ",");
                 for (uint256 i = 0; i < parts.length; i++) {
                     address a = vm.parseAddress(parts[i]);
-                    registry.setAuthorizer(a, true);
+                    KeeperRegistry(deployedRegistry).setAuthorizer(a, true);
                 }
             }
         }
 
         vm.stopBroadcast();
 
-        // 5) JSON manifest for downstream tooling
-        string memory root = "mezo";
-        vm.serializeAddress(root, "RedemptionRouter", address(router));
-        vm.serializeAddress(root, "LiquidationEngine", address(engine));
-        vm.serializeAddress(root, "VaultManager", address(vault));
-        vm.serializeAddress(root, "YieldAggregator", address(aggregator));
-        if (deployRegistry) vm.serializeAddress(root, "KeeperRegistry", address(registry));
-        string memory out = vm.serializeAddress(root, "MUSD", MUSD);
-        vm.writeJson(out, "./deployments/mezo-31611.json");
+        // 5) JSON manifest for downstream tooling (deployments/<chainId>/mezo-<chainId>.json)
+        _writeManifest();
 
         // 6) Log summary
         console2.log("=== TrovePilot deployed on Mezo Testnet (31611) ===");
-        console2.log("Owner:", owner);
-        console2.log("RedemptionRouter:", address(router));
-        console2.log("LiquidationEngine:", address(engine));
-        console2.log("VaultManager:", address(vault));
-        if (deployRegistry) console2.log("KeeperRegistry:", address(registry));
-        console2.log("MUSD:", MUSD);
+        console2.log("Owner:", ownerCached);
+        console2.log("RedemptionRouter:", deployedRouter);
+        console2.log("LiquidationEngine:", deployedEngine);
+        console2.log("VaultManager:", deployedVault);
+        if (deployRegistryCached) console2.log("KeeperRegistry:", deployedRegistry);
+        console2.log("MUSD:", MezoAddresses.MUSD);
+    }
+
+    function _writeManifest() internal {
+        string memory root = "mezo";
+        vm.serializeAddress(root, "RedemptionRouter", deployedRouter);
+        vm.serializeAddress(root, "LiquidationEngine", deployedEngine);
+        vm.serializeAddress(root, "VaultManager", deployedVault);
+        vm.serializeAddress(root, "YieldAggregator", deployedAggregator);
+        if (deployRegistryCached) vm.serializeAddress(root, "KeeperRegistry", deployedRegistry);
+        string memory out = vm.serializeAddress(root, "MUSD", MezoAddresses.MUSD);
+
+        string memory proj = vm.projectRoot();
+        string memory dir = string.concat(proj, "/deployments/", vm.toString(MezoAddresses.CHAIN_ID));
+        vm.createDir(dir, true);
+        string memory rolling = string.concat(dir, "/mezo-", vm.toString(MezoAddresses.CHAIN_ID), ".json");
+        string memory versioned = string.concat(
+            dir, "/mezo-", vm.toString(MezoAddresses.CHAIN_ID), "-", vm.toString(block.number), ".json"
+        );
+        vm.writeJson(out, rolling);
+        vm.writeJson(out, versioned);
     }
 }

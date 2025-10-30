@@ -25,6 +25,18 @@
           ]
         }
       ]
+    },
+    {
+      "type": "function",
+      "name": "liquidateRange",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "_troves", "type": "address[]" },
+        { "name": "_start", "type": "uint256" },
+        { "name": "_count", "type": "uint256" },
+        { "name": "_maxRetries", "type": "uint8" }
+      ],
+      "outputs": [{ "name": "executed", "type": "uint256" }]
     }
   ]
 }

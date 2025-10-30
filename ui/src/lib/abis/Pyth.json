@@ -1,0 +1,25 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "getPriceNoOlderThan",
+      "stateMutability": "view",
+      "inputs": [
+        { "name": "id", "type": "bytes32" },
+        { "name": "maxAge", "type": "uint256" }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "tuple",
+          "components": [
+            { "name": "price", "type": "int64" },
+            { "name": "conf", "type": "uint64" },
+            { "name": "expo", "type": "int32" },
+            { "name": "publishTime", "type": "uint64" }
+          ]
+        }
+      ]
+    }
+  ]
+}

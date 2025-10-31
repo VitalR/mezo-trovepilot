@@ -126,6 +126,19 @@ body {
   letter-spacing: 0.08em;
   color: #6c7788;
 }
+.field__label--normal {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+}
+.field__helper {
+  font-size: 12px;
+  color: #64748b;
+  text-transform: none;
+  letter-spacing: 0;
+}
 .field__input {
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.4);
@@ -136,6 +149,45 @@ body {
   background: rgba(248, 250, 252, 0.9);
   color: #0f172a;
   resize: vertical;
+}
+.field__input.field__input--compact {
+  height: 38px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+.keeper-troves-input {
+  min-height: 64px;
+  max-height: 160px;
+}
+.field--compact {
+  max-width: 220px;
+}
+.keeper-console {
+  padding-right: 0;
+}
+
+.keeper-console .field.stretch {
+  width: min(100%, 460px);
+  align-self: flex-start;
+}
+.keeper-console .keeper-troves-input {
+  max-height: 160px;
+}
+.automation-story {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.automation-story__intro {
+  margin: 0;
+  line-height: 1.5;
+}
+.automation-story__actions {
+  align-self: flex-start;
+  margin-bottom: 12px;
+}
+.automation-story__timeline {
+  margin-top: 0;
 }
 .field__input:focus {
   outline: none;
@@ -312,6 +364,15 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
+.keeper-actions {
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+.row + .row,
+.row + .status,
+.row + .keeper-summary {
+  margin-top: 12px;
+}
 
 .chip {
   display: inline-flex;
@@ -373,7 +434,7 @@ body {
 }
 
 .footer {
-  margin: 24px 0 48px;
+  margin: 32px 0 72px;
   display: flex;
   align-items: center;
   justify-content: center;

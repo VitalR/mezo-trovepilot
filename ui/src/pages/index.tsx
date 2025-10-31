@@ -107,6 +107,7 @@ const SORTED_TROVES = (
 const TROVE_HINT_LIMIT = Number(
   process.env.NEXT_PUBLIC_TROVE_HINT_LIMIT || '6'
 );
+const TROVE_FALLBACK_RAW = process.env.NEXT_PUBLIC_TROVE_FALLBACK_LIST || '';
 type OracleSource = 'skip' | 'pyth';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -205,9 +206,10 @@ export default function Home() {
     null
   );
   const [pythInfo, setPythInfo] = useState<PythInfo | null>(null);
+  const [oracleOverride, setOracleOverride] = useState(false);
   const [keeperTrovesInput, setKeeperTrovesInput] = useState('');
   const [keeperTrovesTouched, setKeeperTrovesTouched] = useState(false);
-  const [troveSuggestions, setTroveSuggestions] = useState<string[]>([]);
+  const [troveSuggestions, setTroveSuggestions] = useState<`0x${string}`[]>([]);
   const [troveHintsLoading, setTroveHintsLoading] = useState(false);
   const [troveHintsError, setTroveHintsError] = useState<string | null>(null);
   const [keeperRetries, setKeeperRetries] = useState(0);
@@ -259,6 +261,12 @@ export default function Home() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('trovepilot-oracle-source', oracleSource);
   }, [oracleSource]);
+
+  useEffect(() => {
+    if (oracleReading?.healthy || demoMode) {
+      setOracleOverride(false);
+    }
+  }, [oracleReading, demoMode]);
 
   useEffect(() => {
     return () => {
@@ -341,8 +349,16 @@ export default function Home() {
     () => parseTroves(keeperTrovesInput),
     [keeperTrovesInput, parseTroves]
   );
-  const showOracleBlocker =
+  const fallbackTroves = useMemo(() => {
+    if (!TROVE_FALLBACK_RAW) return [] as `0x${string}`[];
+    return parseTroves(TROVE_FALLBACK_RAW).troves;
+  }, [parseTroves]);
+  const oracleRequiresOverride =
     !usingDemo && oracleReading && !oracleReading.healthy;
+  const showOracleBlocker = oracleRequiresOverride && !oracleOverride;
+  const oracleWarning: OracleReading | null = oracleRequiresOverride
+    ? oracleReading
+    : null;
   const jobActivities = displayJobs.map((job: any) => ({
     key: `job-${job.keeper}-${job.attempted?.toString?.() || '0'}`,
     type: 'job' as const,
@@ -414,13 +430,13 @@ export default function Home() {
     }
   };
 
-  const applyTroves = useCallback((next: string[]) => {
+  const applyTroves = useCallback((next: `0x${string}`[]) => {
     setKeeperTrovesTouched(true);
     setKeeperTrovesInput(next.join(', '));
   }, []);
 
   const addTrove = useCallback(
-    (addr: string) => {
+    (addr: `0x${string}`) => {
       const { troves } = parseTroves(keeperTrovesInput);
       if (troves.includes(addr)) return;
       applyTroves([...troves, addr]);
@@ -438,6 +454,7 @@ export default function Home() {
         address: SORTED_TROVES as `0x${string}`,
         abi: (sortedAbi as any).abi,
         functionName: 'getFirst',
+        args: [] as const,
       })) as `0x${string}`;
       let cursor: `0x${string}` | null = first
         ? (first.toLowerCase() as `0x${string}`)
@@ -467,19 +484,39 @@ export default function Home() {
         applyTroves(hints.slice(0, Math.min(3, hints.length)));
       }
       if (!hints.length) {
-        setTroveHintsError(
-          'No troves returned from SortedTroves. Paste addresses manually.'
-        );
+        if (fallbackTroves.length) {
+          setTroveSuggestions(fallbackTroves);
+          if (!keeperTrovesTouched) {
+            applyTroves(
+              fallbackTroves.slice(0, Math.min(3, fallbackTroves.length))
+            );
+          }
+          setTroveHintsError(
+            'No on-chain hints available. Using fallback trove list from configuration.'
+          );
+        } else {
+          setTroveHintsError(
+            'No troves returned from SortedTroves. Paste addresses manually.'
+          );
+        }
       }
     } catch (error) {
       console.error('fetchTroveSuggestions failed', error);
       setTroveHintsError(
-        'Unable to fetch trove hints. Paste addresses manually.'
+        fallbackTroves.length
+          ? 'Unable to fetch trove hints. Showing fallback configuration.'
+          : 'Unable to fetch trove hints. Paste addresses manually.'
       );
+      if (!keeperTrovesTouched && fallbackTroves.length) {
+        applyTroves(
+          fallbackTroves.slice(0, Math.min(3, fallbackTroves.length))
+        );
+        setTroveSuggestions(fallbackTroves);
+      }
     } finally {
       setTroveHintsLoading(false);
     }
-  }, [applyTroves, client, keeperTrovesTouched]);
+  }, [applyTroves, client, fallbackTroves, keeperTrovesTouched]);
 
   const useAllSuggestions = useCallback(() => {
     if (!troveSuggestions.length) return;
@@ -505,11 +542,20 @@ export default function Home() {
       return;
     }
     if (!usingDemo) {
-      if (!oracleReading || !oracleReading.healthy) {
+      const oracleIssue = oracleReading;
+      if (!oracleIssue) {
         setKeeperStatus({
           message:
-            oracleReading?.reason ??
             'Oracle feed is unavailable or stale. Refresh or switch sources.',
+          tone: 'warn',
+        });
+        return;
+      }
+      if (!oracleIssue.healthy && !oracleOverride) {
+        setKeeperStatus({
+          message:
+            oracleIssue.reason ??
+            'Oracle feed is unavailable or stale. Acknowledge the warning to continue.',
           tone: 'warn',
         });
         return;
@@ -1050,13 +1096,13 @@ export default function Home() {
         </div>
 
         <div className="grid" style={{ marginTop: 16 }}>
-          <div className="card card--half">
+          <div className="card card--half automation-story">
             <h3>Automation Story</h3>
-            <p className="muted">
+            <p className="muted automation-story__intro">
               Walk through how TrovePilot automates vault protection,
               redemptions, and yield routing.
             </p>
-            <div className="row">
+            <div className="row automation-story__actions">
               <button
                 className="btn"
                 onClick={runDemoFlow}
@@ -1066,7 +1112,7 @@ export default function Home() {
               </button>
               {isRunningDemo && <span className="muted">about 6 seconds</span>}
             </div>
-            <ol className="timeline" style={{ marginTop: 16 }}>
+            <ol className="timeline automation-story__timeline">
               {demoEvents.map((event, idx) => (
                 <li key={`${idx}-${event}`} className="timeline__item">
                   <span className="timeline__index">{idx + 1}</span>
@@ -1139,7 +1185,7 @@ export default function Home() {
             </ul>
           </div>
 
-          <div className="card card--half">
+          <div className="card card--half keeper-console">
             <h3>Keeper Console</h3>
             <p className="muted">
               Connect your keeper wallet to trigger a live liquidation job on
@@ -1179,26 +1225,46 @@ export default function Home() {
                     <span>Waiting for latest price…</span>
                   )}
                 </div>
-                {showOracleBlocker && oracleReading?.reason && (
+                {oracleWarning?.reason && (
                   <div className="keeper-oracle__hint">
-                    {oracleReading.reason}
+                    {oracleWarning.reason}
+                  </div>
+                )}
+                {oracleWarning && (
+                  <div className="keeper-oracle__override">
+                    <label className="override-toggle">
+                      <input
+                        type="checkbox"
+                        checked={oracleOverride}
+                        onChange={(event) =>
+                          setOracleOverride(event.target.checked)
+                        }
+                      />
+                      <span>
+                        I understand the oracle is degraded and want to proceed
+                      </span>
+                    </label>
                   </div>
                 )}
               </div>
             )}
-            <label className="field">
-              <span className="field__label">
-                Troves (comma or newline separated)
+            <label className="field stretch" htmlFor="keeper-troves">
+              <span className="field__label field__label--normal">
+                Troves to liquidate
+              </span>
+              <span className="field__helper">
+                Comma or newline-separated addresses
               </span>
               <textarea
-                className="field__input"
-                rows={3}
+                className="field__input keeper-troves-input"
+                rows={2}
                 value={keeperTrovesInput}
                 onChange={(e) => {
                   setKeeperTrovesTouched(true);
                   setKeeperTrovesInput(e.target.value);
                 }}
-                placeholder="Paste liquidatable troves e.g. 0xabc..., 0xdef..."
+                id="keeper-troves"
+                placeholder="Paste trove addresses, e.g. 0xabc..., 0xdef..."
               />
             </label>
             {invalidTroves.length > 0 && (
@@ -1252,10 +1318,10 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <label className="field">
+            <label className="field field--compact">
               <span className="field__label">Max retries per trove</span>
               <input
-                className="field__input"
+                className="field__input field__input--compact"
                 type="number"
                 min={0}
                 max={5}
@@ -1267,7 +1333,7 @@ export default function Home() {
                 }
               />
             </label>
-            <div className="row">
+            <div className="row keeper-actions">
               <button
                 className="btn"
                 onClick={triggerKeeperJob}
@@ -1331,18 +1397,13 @@ export default function Home() {
           </div>
         </div>
         <div className="container footer">
+          <span className="muted">Docs &amp; runbook:</span>
           <a
             className="link"
-            href={process.env.NEXT_PUBLIC_FAQ_URL || '#'}
-            target="_blank"
-            rel="noreferrer"
-          >
-            FAQ
-          </a>
-          <span>·</span>
-          <a
-            className="link"
-            href={process.env.NEXT_PUBLIC_TROVEPILOT_DOCS_URL || '#'}
+            href={
+              process.env.NEXT_PUBLIC_TROVEPILOT_DOCS_URL ||
+              'https://github.com/VitalR/mezo-trovepilot/tree/main/docs'
+            }
             target="_blank"
             rel="noreferrer"
           >
@@ -1351,7 +1412,10 @@ export default function Home() {
           <span>·</span>
           <a
             className="link"
-            href={process.env.NEXT_PUBLIC_GITHUB_URL || 'https://github.com'}
+            href={
+              process.env.NEXT_PUBLIC_GITHUB_URL ||
+              'https://github.com/VitalR/mezo-trovepilot'
+            }
             target="_blank"
             rel="noreferrer"
           >

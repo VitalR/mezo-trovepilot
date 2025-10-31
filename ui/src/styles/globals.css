@@ -505,10 +505,103 @@ body {
   background: #e1f8f0;
   color: #0f5132;
 }
+.pill--warn {
+  background: #fef3c7;
+  color: #92400e;
+}
 .pill--mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   background: #f1f4f9;
   color: #1f2937;
+}
+
+.keeper-oracle {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  background: rgba(248, 250, 252, 0.7);
+  font-size: 13px;
+}
+.keeper-oracle--warn {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(254, 226, 226, 0.5);
+}
+.keeper-oracle__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.keeper-oracle__title {
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #475569;
+}
+.keeper-oracle__body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #334155;
+}
+.keeper-oracle__hint {
+  color: #b91c1c;
+}
+
+.keeper-warning {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(254, 226, 226, 0.45);
+  color: #7f1d1d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trove-suggestions {
+  margin: 14px 0;
+  display: grid;
+  gap: 10px;
+}
+.trove-suggestions__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.trove-suggestions__chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.trove-suggestions__error {
+  color: #92400e;
+  font-size: 12px;
+}
+
+.trove-chip {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(248, 250, 252, 0.9);
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+.trove-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.trove-chip:not(:disabled):hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(191, 219, 254, 0.3);
 }
 
 .activity {

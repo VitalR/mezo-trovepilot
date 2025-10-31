@@ -1,9 +1,32 @@
-import js from "@eslint/js";
-import globals from "globals";
-import pluginReact from "eslint-plugin-react";
-import { defineConfig } from "eslint/config";
+import js from '@eslint/js';
+import globals from 'globals';
+import pluginReact from 'eslint-plugin-react';
 
-export default defineConfig([
-  { files: ["**/*.{js,mjs,cjs,jsx}"], plugins: { js }, extends: ["js/recommended"], languageOptions: { globals: globals.browser } },
+export default [
+  {
+    ignores: ['**/.next/**', '**/node_modules/**'],
+  },
+  js.configs.recommended,
   pluginReact.configs.flat.recommended,
-]);
+  {
+    files: ['**/*.{js,mjs,cjs,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+    },
+    settings: {
+      react: {
+        version: 'detect',
+      },
+    },
+  },
+  {
+    files: ['next.config.js', '**/*.config.{js,cjs}', 'src/shims/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+];

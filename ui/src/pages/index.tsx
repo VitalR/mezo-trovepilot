@@ -10,6 +10,7 @@ import { mezoTestnet } from '../lib/chains';
 import engineAbi from '../lib/abis/LiquidationEngine.json';
 import regAbi from '../lib/abis/KeeperRegistry.json';
 import pythAbi from '../lib/abis/Pyth.json';
+import sortedAbi from '../lib/abis/SortedTroves.json';
 
 const DEMO_DATA = {
   oracleStatus: 'active (111,982)',
@@ -99,7 +100,16 @@ const PYTH_PRICE_ID = process.env.NEXT_PUBLIC_PYTH_PRICE_ID || '';
 const PYTH_MAX_AGE_SECONDS = Number(
   process.env.NEXT_PUBLIC_PYTH_MAX_AGE_SECONDS || '3600'
 );
+const SORTED_TROVES = (
+  process.env.NEXT_PUBLIC_SORTED_TROVES ||
+  '0x722E4D24FD6Ff8b0AC679450F3D91294607268fA'
+).toLowerCase();
+const TROVE_HINT_LIMIT = Number(
+  process.env.NEXT_PUBLIC_TROVE_HINT_LIMIT || '6'
+);
 type OracleSource = 'skip' | 'pyth';
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const ACTIVITY_ICON = {
   demo: {
@@ -132,6 +142,16 @@ type PythInfo = {
   conf: string;
   publishTime: number;
   expo: number;
+};
+
+type OracleReading = {
+  source: OracleSource;
+  label: string;
+  raw: bigint | null;
+  ageSeconds: number | null;
+  healthy: boolean;
+  fallback?: boolean;
+  reason?: string;
 };
 
 const formatAge = (seconds: number): string => {
@@ -175,34 +195,33 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
   const hasPythConfig = Boolean(PYTH_CONTRACT && PYTH_PRICE_ID);
-  const [oracleSource, setOracleSource] = useState<OracleSource>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = window.localStorage.getItem('trovepilot-oracle-source');
-      if (stored === 'pyth' && hasPythConfig) return 'pyth';
-      if (stored === 'skip') return 'skip';
-    }
-    const envDefault = process.env.NEXT_PUBLIC_DEFAULT_ORACLE_SOURCE;
-    if (envDefault === 'pyth' && hasPythConfig) return 'pyth';
-    return 'skip';
-  });
-  const [pythInfo, setPythInfo] = useState<PythInfo | null>(null);
-  const [keeperTrovesInput, setKeeperTrovesInput] = useState(
-    '0x1111111111111111111111111111111111111111, 0x2222222222222222222222222222222222222222'
+  const envOracleDefault =
+    process.env.NEXT_PUBLIC_DEFAULT_ORACLE_SOURCE === 'pyth' && hasPythConfig
+      ? 'pyth'
+      : 'skip';
+  const [oracleSource, setOracleSource] =
+    useState<OracleSource>(envOracleDefault);
+  const [oracleReading, setOracleReading] = useState<OracleReading | null>(
+    null
   );
+  const [pythInfo, setPythInfo] = useState<PythInfo | null>(null);
+  const [keeperTrovesInput, setKeeperTrovesInput] = useState('');
+  const [keeperTrovesTouched, setKeeperTrovesTouched] = useState(false);
+  const [troveSuggestions, setTroveSuggestions] = useState<string[]>([]);
+  const [troveHintsLoading, setTroveHintsLoading] = useState(false);
+  const [troveHintsError, setTroveHintsError] = useState<string | null>(null);
   const [keeperRetries, setKeeperRetries] = useState(0);
-  const [keeperStatus, setKeeperStatus] = useState<
-    { message: string; tone: 'ok' | 'warn' | 'pending' }
-  >();
+  const [keeperStatus, setKeeperStatus] = useState<{
+    message: string;
+    tone: 'ok' | 'warn' | 'pending';
+  }>();
   const [keeperTxHash, setKeeperTxHash] = useState<`0x${string}` | undefined>();
-  const [lastKeeperResult, setLastKeeperResult] = useState<
-    | {
-        attempted: bigint;
-        executed: bigint;
-        gasUsed: bigint;
-        timestamp: bigint;
-      }
-    | null
-  >(null);
+  const [lastKeeperResult, setLastKeeperResult] = useState<{
+    attempted: bigint;
+    executed: bigint;
+    gasUsed: bigint;
+    timestamp: bigint;
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -211,6 +230,16 @@ export default function Home() {
       setDemoMode(stored === 'true');
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem('trovepilot-oracle-source');
+    if (stored === 'pyth' && hasPythConfig) {
+      setOracleSource('pyth');
+    } else if (stored === 'skip') {
+      setOracleSource('skip');
+    }
+  }, [hasPythConfig]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -286,7 +315,34 @@ export default function Home() {
   const pythAgeSeconds = pythInfo
     ? Math.max(0, Math.floor(Date.now() / 1000 - pythInfo.publishTime))
     : null;
-  const pythAgeDisplay = pythAgeSeconds !== null ? formatAge(pythAgeSeconds) : null;
+  const pythAgeDisplay =
+    pythAgeSeconds !== null ? formatAge(pythAgeSeconds) : null;
+  const parseTroves = useCallback((raw: string) => {
+    const troves: `0x${string}`[] = [];
+    const invalid: string[] = [];
+    raw
+      .split(/[\s,]+/)
+      .map((addr) => addr.trim())
+      .filter(Boolean)
+      .forEach((addr) => {
+        const lower = addr.toLowerCase();
+        const looksAddress = lower.startsWith('0x') && lower.length === 42;
+        if (!looksAddress) {
+          invalid.push(addr);
+          return;
+        }
+        if (!troves.includes(lower as `0x${string}`)) {
+          troves.push(lower as `0x${string}`);
+        }
+      });
+    return { troves, invalid };
+  }, []);
+  const { troves: parsedTroves, invalid: invalidTroves } = useMemo(
+    () => parseTroves(keeperTrovesInput),
+    [keeperTrovesInput, parseTroves]
+  );
+  const showOracleBlocker =
+    !usingDemo && oracleReading && !oracleReading.healthy;
   const jobActivities = displayJobs.map((job: any) => ({
     key: `job-${job.keeper}-${job.attempted?.toString?.() || '0'}`,
     type: 'job' as const,
@@ -324,6 +380,8 @@ export default function Home() {
       hash: keeperTxHash,
       query: { enabled: Boolean(keeperTxHash) },
     });
+  const jobButtonDisabled =
+    keeperPending || keeperConfirming || Boolean(showOracleBlocker);
 
   const formatTimestamp = (ts: number | null) =>
     ts
@@ -356,9 +414,82 @@ export default function Home() {
     }
   };
 
+  const applyTroves = useCallback((next: string[]) => {
+    setKeeperTrovesTouched(true);
+    setKeeperTrovesInput(next.join(', '));
+  }, []);
+
+  const addTrove = useCallback(
+    (addr: string) => {
+      const { troves } = parseTroves(keeperTrovesInput);
+      if (troves.includes(addr)) return;
+      applyTroves([...troves, addr]);
+    },
+    [applyTroves, keeperTrovesInput, parseTroves]
+  );
+
+  const fetchTroveSuggestions = useCallback(async () => {
+    if (!SORTED_TROVES) return;
+    setTroveHintsError(null);
+    setTroveHintsLoading(true);
+    try {
+      const hints: `0x${string}`[] = [];
+      const first = (await client.readContract({
+        address: SORTED_TROVES as `0x${string}`,
+        abi: (sortedAbi as any).abi,
+        functionName: 'getFirst',
+      })) as `0x${string}`;
+      let cursor: `0x${string}` | null = first
+        ? (first.toLowerCase() as `0x${string}`)
+        : null;
+      let guard = 0;
+      while (cursor && cursor !== ZERO_ADDRESS && guard < TROVE_HINT_LIMIT) {
+        hints.push(cursor);
+        guard += 1;
+        const next = (await client.readContract({
+          address: SORTED_TROVES as `0x${string}`,
+          abi: (sortedAbi as any).abi,
+          functionName: 'getNext',
+          args: [cursor],
+        })) as `0x${string}`;
+        const normalized = next ? (next.toLowerCase() as `0x${string}`) : null;
+        if (
+          !normalized ||
+          normalized === ZERO_ADDRESS ||
+          normalized === cursor
+        ) {
+          break;
+        }
+        cursor = normalized;
+      }
+      setTroveSuggestions(hints);
+      if (!keeperTrovesTouched && hints.length) {
+        applyTroves(hints.slice(0, Math.min(3, hints.length)));
+      }
+      if (!hints.length) {
+        setTroveHintsError(
+          'No troves returned from SortedTroves. Paste addresses manually.'
+        );
+      }
+    } catch (error) {
+      console.error('fetchTroveSuggestions failed', error);
+      setTroveHintsError(
+        'Unable to fetch trove hints. Paste addresses manually.'
+      );
+    } finally {
+      setTroveHintsLoading(false);
+    }
+  }, [applyTroves, client, keeperTrovesTouched]);
+
+  const useAllSuggestions = useCallback(() => {
+    if (!troveSuggestions.length) return;
+    applyTroves(troveSuggestions);
+  }, [applyTroves, troveSuggestions]);
+
   const triggerKeeperJob = async () => {
     setKeeperStatus(undefined);
     setLastKeeperResult(null);
+    setKeeperTrovesTouched(true);
     if (!walletAddress) {
       setKeeperStatus({
         message: 'Connect a keeper wallet to run a job.',
@@ -373,10 +504,27 @@ export default function Home() {
       });
       return;
     }
-    const troves = keeperTrovesInput
-      .split(/[\s,]+/)
-      .map((addr) => addr.trim())
-      .filter(Boolean);
+    if (!usingDemo) {
+      if (!oracleReading || !oracleReading.healthy) {
+        setKeeperStatus({
+          message:
+            oracleReading?.reason ??
+            'Oracle feed is unavailable or stale. Refresh or switch sources.',
+          tone: 'warn',
+        });
+        return;
+      }
+    }
+    const { troves, invalid } = parseTroves(keeperTrovesInput);
+    if (invalid.length) {
+      setKeeperStatus({
+        message: `Remove invalid trove address${
+          invalid.length > 1 ? 'es' : ''
+        }: ${invalid.map((entry) => short(entry)).join(', ')}`,
+        tone: 'warn',
+      });
+      return;
+    }
     if (!troves.length) {
       setKeeperStatus({
         message: 'Provide at least one trove address.',
@@ -385,12 +533,11 @@ export default function Home() {
       return;
     }
     try {
-      const troveList = troves.map((addr) => addr as `0x${string}`);
       const hash = await writeContractAsync({
         abi: (engineAbi as any).abi,
         address: ENGINE as `0x${string}`,
         functionName: 'liquidateRange',
-        args: [troveList, 0n, BigInt(troveList.length), keeperRetries],
+        args: [troves, 0n, BigInt(troves.length), keeperRetries],
       });
       setKeeperTxHash(hash);
       setKeeperStatus({
@@ -491,6 +638,10 @@ export default function Home() {
   const refresh = useCallback(async () => {
     let oracleResolved = false;
 
+    if (usingDemo) {
+      setOracleReading(null);
+    }
+
     if (oracleSource === 'pyth' && hasPythConfig) {
       try {
         const priceData: any = await client.readContract({
@@ -523,14 +674,37 @@ export default function Home() {
           const staleSeconds = ageSeconds - PYTH_MAX_AGE_SECONDS;
           const staleLabel = formatAge(staleSeconds);
           setOracleStatus(`inactive • pyth (stale by ${staleLabel})`);
+          setOracleReading({
+            source: 'pyth',
+            label: priceFormatted,
+            raw: priceRaw,
+            ageSeconds,
+            healthy: false,
+            reason: `Price stale by ${staleLabel}`,
+          });
         } else {
           setOracleStatus(`active • pyth (${priceFormatted})`);
           oracleResolved = true;
+          setOracleReading({
+            source: 'pyth',
+            label: priceFormatted,
+            raw: priceRaw,
+            ageSeconds,
+            healthy: true,
+          });
         }
       } catch (error) {
         console.error('Pyth price fetch failed', error);
         setPythInfo(null);
         setOracleStatus('inactive • pyth (fetch failed; using skip)');
+        setOracleReading({
+          source: 'pyth',
+          label: '—',
+          raw: null,
+          ageSeconds: null,
+          healthy: false,
+          reason: 'Pyth price fetch failed; attempting skip fallback.',
+        });
       }
     }
 
@@ -549,9 +723,7 @@ export default function Home() {
         const hex = data as `0x${string}`;
         const price = BigInt(hex);
         const label =
-          oracleSource === 'pyth'
-            ? 'skip fallback - pyth unavailable'
-            : 'skip';
+          oracleSource === 'pyth' ? 'skip fallback - pyth unavailable' : 'skip';
         setOracleStatus(
           price > 0n
             ? `active • ${label} (${price})`
@@ -560,10 +732,32 @@ export default function Home() {
         if (oracleSource !== 'pyth') {
           setPythInfo(null);
         }
+        setOracleReading({
+          source: 'skip',
+          label: price > 0n ? price.toString() : '—',
+          raw: price,
+          ageSeconds: null,
+          healthy: price > 0n,
+          fallback: oracleSource === 'pyth',
+          reason:
+            price > 0n
+              ? oracleSource === 'pyth'
+                ? 'Using skip while Pyth is unavailable.'
+                : undefined
+              : 'Skip oracle returned zero price.',
+        });
       } catch (error) {
         console.error('Skip oracle fetch failed', error);
         if (!oracleResolved) {
           setOracleStatus('inactive • skip (call failed)');
+          setOracleReading({
+            source: 'skip',
+            label: '—',
+            raw: null,
+            ageSeconds: null,
+            healthy: false,
+            reason: 'Skip oracle RPC call failed.',
+          });
         }
       }
     }
@@ -606,6 +800,10 @@ export default function Home() {
       }
     }
 
+    if (!usingDemo && SORTED_TROVES) {
+      await fetchTroveSuggestions();
+    }
+
     setLastUpdated(Date.now());
   }, [
     REG,
@@ -613,6 +811,8 @@ export default function Home() {
     client,
     hasPythConfig,
     oracleSource,
+    fetchTroveSuggestions,
+    usingDemo,
   ]);
 
   const summarizeRecentJob = useCallback(
@@ -688,6 +888,12 @@ export default function Home() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!demoMode) {
+      void refresh();
+    }
+  }, [demoMode, refresh]);
 
   return (
     <>
@@ -797,7 +1003,8 @@ export default function Home() {
             )}
             {!hasPythConfig && !usingDemo && (
               <div className="oracle-hint">
-                Set NEXT_PUBLIC_PYTH_CONTRACT and NEXT_PUBLIC_PYTH_PRICE_ID to enable this toggle.
+                Set NEXT_PUBLIC_PYTH_CONTRACT and NEXT_PUBLIC_PYTH_PRICE_ID to
+                enable this toggle.
               </div>
             )}
             <div className="info-card__foot muted">{dataSourceDescription}</div>
@@ -939,6 +1146,46 @@ export default function Home() {
               Mezo. Provide known trove addresses or hints exported from the
               demo script.
             </p>
+            {!usingDemo && (
+              <div
+                className={`keeper-oracle ${
+                  showOracleBlocker ? 'keeper-oracle--warn' : ''
+                }`}
+              >
+                <div className="keeper-oracle__header">
+                  <span className="keeper-oracle__title">Oracle feed</span>
+                  <span
+                    className={`pill ${
+                      oracleReading?.healthy ? 'pill--ok' : 'pill--warn'
+                    }`}
+                  >
+                    {oracleReading ? oracleReading.label : 'fetching…'}
+                  </span>
+                </div>
+                <div className="keeper-oracle__body">
+                  {oracleReading ? (
+                    <>
+                      <span>
+                        Source:{' '}
+                        {oracleReading.fallback
+                          ? 'Skip fallback'
+                          : selectedOracle.label}
+                      </span>
+                      {oracleReading.ageSeconds !== null && (
+                        <span>Age {formatAge(oracleReading.ageSeconds)}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span>Waiting for latest price…</span>
+                  )}
+                </div>
+                {showOracleBlocker && oracleReading?.reason && (
+                  <div className="keeper-oracle__hint">
+                    {oracleReading.reason}
+                  </div>
+                )}
+              </div>
+            )}
             <label className="field">
               <span className="field__label">
                 Troves (comma or newline separated)
@@ -947,10 +1194,64 @@ export default function Home() {
                 className="field__input"
                 rows={3}
                 value={keeperTrovesInput}
-                onChange={(e) => setKeeperTrovesInput(e.target.value)}
-                placeholder="0xabc..., 0xdef..."
+                onChange={(e) => {
+                  setKeeperTrovesTouched(true);
+                  setKeeperTrovesInput(e.target.value);
+                }}
+                placeholder="Paste liquidatable troves e.g. 0xabc..., 0xdef..."
               />
             </label>
+            {invalidTroves.length > 0 && (
+              <div className="keeper-warning">
+                Remove invalid address
+                {invalidTroves.length > 1 ? 'es' : ''}:{' '}
+                {invalidTroves.map((addr) => short(addr)).join(', ')}
+              </div>
+            )}
+            <div className="trove-suggestions">
+              <div className="trove-suggestions__header">
+                <span className="field__label">Suggested troves</span>
+                <div className="row">
+                  <button
+                    className="btn btn--ghost"
+                    onClick={() => fetchTroveSuggestions()}
+                    disabled={troveHintsLoading}
+                  >
+                    {troveHintsLoading ? 'Loading…' : 'Refresh hints'}
+                  </button>
+                  <button
+                    className="btn btn--ghost"
+                    onClick={useAllSuggestions}
+                    disabled={!troveSuggestions.length}
+                  >
+                    Use all
+                  </button>
+                </div>
+              </div>
+              <div className="trove-suggestions__chips">
+                {troveSuggestions.map((addr) => (
+                  <button
+                    key={addr}
+                    type="button"
+                    className="trove-chip"
+                    onClick={() => addTrove(addr)}
+                    disabled={parsedTroves.includes(addr)}
+                  >
+                    {short(addr)}
+                  </button>
+                ))}
+                {!troveHintsLoading && !troveSuggestions.length && (
+                  <span className="muted">
+                    No hints yet — refresh to fetch.
+                  </span>
+                )}
+              </div>
+              {troveHintsError && (
+                <div className="trove-suggestions__error muted">
+                  {troveHintsError}
+                </div>
+              )}
+            </div>
             <label className="field">
               <span className="field__label">Max retries per trove</span>
               <input
@@ -970,10 +1271,12 @@ export default function Home() {
               <button
                 className="btn"
                 onClick={triggerKeeperJob}
-                disabled={keeperPending || keeperConfirming}
+                disabled={jobButtonDisabled}
               >
                 {keeperPending || keeperConfirming
                   ? 'Submitting…'
+                  : showOracleBlocker
+                  ? 'Oracle blocked'
                   : 'Run Keeper Job'}
               </button>
               {!walletAddress && (
@@ -988,17 +1291,23 @@ export default function Home() {
             {lastKeeperResult && (
               <div className="keeper-summary">
                 <div>
-                  Attempted <strong>{lastKeeperResult.attempted.toString()}</strong> troves
+                  Attempted{' '}
+                  <strong>{lastKeeperResult.attempted.toString()}</strong>{' '}
+                  troves
                 </div>
                 <div>
-                  Executed <strong>{lastKeeperResult.executed.toString()}</strong> · Gas used{' '}
-                  <strong>{lastKeeperResult.gasUsed.toString()}</strong>
+                  Executed{' '}
+                  <strong>{lastKeeperResult.executed.toString()}</strong> · Gas
+                  used <strong>{lastKeeperResult.gasUsed.toString()}</strong>
                 </div>
                 <div>
-                  Recorded {formatAge(
+                  Recorded{' '}
+                  {formatAge(
                     Math.max(
                       0,
-                      Math.floor(Date.now() / 1000 - Number(lastKeeperResult.timestamp))
+                      Math.floor(
+                        Date.now() / 1000 - Number(lastKeeperResult.timestamp)
+                      )
                     )
                   )}{' '}
                   ago

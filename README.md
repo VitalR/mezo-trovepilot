@@ -17,6 +17,8 @@ Built for the **Advanced DeFi Solutions** track of the **Mezo Hackathon 2025**.
 - **YieldAggregator (stub)** — minimal MUSD sink to demonstrate routing/compounding flows in the demo.
 - **UI** — a lightweight Next.js dashboard with a guided demo, live contract references, a keeper console, and activity feed.
 
+See the architecture diagrams in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ---
 
 ## Why it matters (judge lens)

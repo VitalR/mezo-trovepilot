@@ -117,15 +117,15 @@ contract TrovePilotDemoScript is Script {
     ) internal {
         {
             uint256 bal = IERC20(MezoAddresses.MUSD).balanceOf(vaultUser);
-        console2.log("USER MUSD:", bal);
-        if (bal >= 20e18) {
-            IERC20(MezoAddresses.MUSD).approve(address(vault), type(uint256).max);
+            console2.log("USER MUSD:", bal);
+            if (bal >= 20e18) {
+                IERC20(MezoAddresses.MUSD).approve(address(vault), type(uint256).max);
                 try vault.fund(20e18) { }
                 catch {
                     console2.log("Fund failed (inspect allowances/owner)");
                 }
-        } else {
-            console2.log("Skip funding: not enough MUSD on USER (need 20e18)");
+            } else {
+                console2.log("Skip funding: not enough MUSD on USER (need 20e18)");
             }
         }
 

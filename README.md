@@ -2,43 +2,92 @@
 
 **Permissionless keeper automation for Mezo MUSD**
 
-TrovePilot is a composable, on-chain automation layer that improves Mezo’s peg-defense and user UX by batching liquidations, streamlining redemptions, and enabling an open keeper economy. It ships with a small, demo-friendly UI so judges can see the system in action on Mezo testnet.
+TrovePilot is a composable, on-chain automation layer for the Mezo stablecoin ecosystem.
 
-Built for the **Advanced DeFi Solutions** track of the **Mezo Hackathon 2025**.
+It focuses on:
+- batching liquidations,
+- streamlining redemptions, and
+- enabling an open, transparent keeper economy around MUSD.
+
+Built during the **Mezo Hackathon 2025** (Advanced DeFi Solutions track).
+
+> **Protocol-first:** TrovePilot is designed primarily as **infrastructure**.  
+> The core value lives in the smart contracts (liquidation, redemption, keeper logic).  
+> The Next.js dashboard is a minimal reference client to visualize how these pieces work on Mezo testnet—not a finished consumer product.
+
+---
+
+## Why it matters
+
+MUSD stability and healthy trove management depend on timely liquidations and redemptions.
+
+Today, this kind of maintenance is often:
+- concentrated in a few private bots,
+- opaque to users,
+- hard to join as an independent keeper.
+
+**TrovePilot** aims to turn that into:
+
+- **Open peg defense** – replaces closed infra with verifiable, on-chain executors.
+- **Real MUSD utility** – MUSD is used for funding actions, rewarding keepers, and routing flows.
+- **Composable infra** – small modules that plug directly into Mezo’s TroveManager, SortedTroves, and oracle stack.
+- **Permissionless participation** – anyone can integrate, run keepers, or build on top.
 
 ---
 
 ## What’s inside
 
-- **LiquidationEngine** — strategy-oriented executor with partial ranges, retries, and on-chain job indexing; forwards protocol rewards to the caller. Optional scoring and fee routing.
-- **RedemptionRouter** — helper for hinted redemptions plus a “quick mode” for small amounts.
-- **KeeperRegistry** — minimal registry + scoring to enable an open keeper economy.
-- **VaultManager (MVP)** — users pre-fund MUSD; any keeper can execute small redemptions on their behalf and earn a fee.
-- **YieldAggregator (stub)** — minimal MUSD sink to demonstrate routing/compounding flows in the demo.
-- **UI** — a lightweight Next.js dashboard with a guided demo, live contract references, a keeper console, and activity feed.
+**Core contracts and components**
 
-See the architecture diagrams in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+| Module | Function |
+|:--|:--|
+| **LiquidationEngine** | Batches liquidations, handles retries, indexes jobs on-chain, forwards rewards (with optional fees & scoring) |
+| **RedemptionRouter** | Wraps TroveManager; supports hinted redemptions + “quick mode” for small redemptions |
+| **KeeperRegistry** | Tracks keeper metadata (e.g. `payTo`, score) and enables transparent payout routing |
+| **VaultManager (MVP)** | Lets users pre-fund MUSD so any keeper can execute small redemptions on their behalf for a fee |
+| **YieldAggregator (stub)** | Placeholder sink to demonstrate how automated MUSD routing/compounding could plug in |
+| **UI (Next.js)** | Lightweight dashboard with demo mode, contract references, keeper console, and activity feed |
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams and flows.
 
 ---
 
-## Why it matters (judge lens)
+## Status & scope
 
-- **Mezo integration (30%)**: Uses MUSD in redemptions, integrates with oracle flows, and exposes keeper operations that move protocol state on Mezo testnet.
-- **Technical implementation (30%)**: Modular Solidity contracts, clear separation of responsibilities, deterministic scripts, and a Makefile-based workflow for repeatable deploys and demos.
-- **Business viability (20%)**: Lowers the barrier for community keepers; turns security-critical operations into a transparent, competitive market with reputation and payouts.
-- **UX (10%)**: Guided “Automation Story”, activity feed, and a keeper console that runs a live job.
-- **Presentation (10%)**: One-command scripts, clear docs, and a demo-first UI.
+This repository is a **hackathon prototype**, not production code.
+
+**Included**
+
+- Working, verifiable contracts on Mezo testnet.
+- Deterministic deployment & verification scripts.
+- Demo-focused dashboard with Demo Mode + Live wiring.
+- Example flows for:
+  - batched liquidations,
+  - hinted/quick redemptions,
+  - opt-in vault automation via `VaultManager`.
+
+**Not (yet) included**
+
+- Formal audits / full production hardening.
+- Complete keeper marketplace, slashing, or complex incentive logic.
+- Production-grade UX for non-technical users.
+- Finalized yield routes or continuous policy engines.
+
+The design is intentionally modular so it can be extended with Mezo and the community.
 
 ---
 
 ## Getting started
 
-Configuration notes live in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md). These Make targets wrap all shell incantations so judges can reproduce quickly.
+Configuration details live in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
+
+Use the provided `make` targets for reproducible flows.
 
 ### Prereqs
 
-- Foundry (forge/cast): see the [installation guide](https://book.getfoundry.sh/getting-started/installation)
-- Mezo testnet RPC and a funded deployer key (tBTC)
+- [Foundry](https://book.getfoundry.sh/getting-started/installation) (`forge`, `cast`)
+- Mezo testnet RPC
+- EVM wallet funded with gas on Mezo testnet (tBTC as gas)
 
 ### Install & build
 
@@ -47,118 +96,138 @@ make install
 make build
 ```
 
-### Run tests
-
+Run tests
 ```bash
+# Local / unit tests
 make test
-# or against a live Mezo fork (requires MEZO_RPC in .env.testnet)
+
+# Against a Mezo fork (requires MEZO_RPC in .env.testnet)
 make test-fork
 ```
 
-### Deploy to Mezo testnet (one-shot deploy + verify)
-
+Deploy to Mezo testnet
 ```bash
-# Expects .env.testnet with MEZO_RPC and DEPLOYER_PRIVATE_KEY
+# Uses .env.testnet:
+# MEZO_RPC, DEPLOYER_PRIVATE_KEY, plus optional flags
 make deploy-testnet
 ```
 
-### Run the on-chain demo flow
-
+Run the demo flow
 ```bash
 make demo-testnet
 ```
 
-### Export ABIs for the UI (optional)
-
+Export ABIs
 ```bash
 make abi
 ```
 
----
+### UI (Next.js) — reference dashboard
 
-## UI (Next.js) – live dashboard & guided demo
+The `ui` package is a thin reference client to:
+- display live contract addresses and status,
+- run a guided “Automation Story”,
+- provide a keeper console for job submission,
+- show a simple activity feed.
 
-The UI shows metrics, contract addresses, an activity feed, and a keeper console capable of running a live job.
-
+Quick start:
 1. `cd ui && npm i`
-2. Create `ui/.env.local` with at least:
-
-```bash
-NEXT_PUBLIC_RPC_URL=https://rpc.test.mezo.org
-# Optional: wire live contracts (all lowercase)
-NEXT_PUBLIC_ENGINE=0x...
-NEXT_PUBLIC_ROUTER=0x...
-NEXT_PUBLIC_VAULT=0x...
-NEXT_PUBLIC_AGGREGATOR=0x...
-NEXT_PUBLIC_REGISTRY=0x...
-NEXT_PUBLIC_SORTED_TROVES=0x722E4D24FD6Ff8b0AC679450F3D91294607268fA
-# Fallback trove list used when on-chain hints are unavailable (comma-separated)
-NEXT_PUBLIC_TROVE_FALLBACK_LIST=0xabc...,0xdef...
-# Optional Pyth support
-NEXT_PUBLIC_PYTH_CONTRACT=0x...
-NEXT_PUBLIC_PYTH_PRICE_ID=0x...
-NEXT_PUBLIC_PYTH_MAX_AGE_SECONDS=3600
-```
-
-3. `npm run dev` and open http://localhost:3000
-
-Tips for judges:
-
-- Toggle “Demo Mode” to see simulated activity instantly.
-- Click “Run Guided Demo” to watch the Automation Story fill in.
-- With live addresses configured, paste troves in the keeper console and submit a job.
-
----
-
-## Contract details
-
-### Keeper Scoring & Payouts (LiquidationEngine)
-
-- When `KeeperRegistry` is configured, `LiquidationEngine` will:
-  - bump the caller's score by `pointsPerLiquidation * executed`
-  - forward rewards to the keeper's `payTo` address if set (else to caller)
-- Owners can tune:
-  - `setPointsPerLiquidation(uint96)` to adjust scoring weight
-  - `setFeeBps(uint16)` and `setFeeSink(address)` for protocol fees
-
-### VaultManager (MVP) Flow
-
-1. User opts in and sets config:
-   - `musdPerRedeem`, `maxIterations`, `keeperFeeBps`, `active`
-2. User funds MUSD into `VaultManager`.
-3. Any keeper calls `execute(user, price)` to run `redeemExact` with user's funds.
-4. Keeper receives MUSD fee from the user’s balance; user’s MUSD is burned to redeem collateral.
+2. Create `ui/.env.local` (see [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for all keys)
+3. `npm run dev` → open http://localhost:3000
 
 Notes:
-
-- MVP demonstrates automation; users explicitly pre-fund keeper bounties in MUSD.
-- Price must match the system price used by TroveManager.
-
-### Trove Hint Dump (keeper fallback list)
-
-Export addresses from `SortedTroves` and paste into `NEXT_PUBLIC_TROVE_FALLBACK_LIST` so the UI can suggest troves when the oracle/hints are unavailable.
-
-```bash
-make demo-testnet   # also logs addresses used in the session
-```
+- `Demo Mode`: uses scripted data; no wallet needed.
+- `Live Mode`: uses your configured Mezo RPC + contracts for real calls.
+- Trove suggestions can come from `SortedTroves` or from a fallback list exported by the helper scripts.
 
 ---
 
-## Roadmap (post‑hackathon)
+### Contract details (high level)
 
-- Enable continuous vault protection (policy-based triggers, partial liquidations)
-- Keeper marketplace with slashing-resistant scoring and transparent payouts
-- Yield routes for idle MUSD balances with risk controls
-- Live analytics and alerts (webhooks, Telegram/Discord)
+**LiquidationEngine**
+- Batches or loops through trove sets (best-effort, non-reverting).
+- Records job metadata on-chain for easy indexing.
+- Forwards rewards to:
+  - keeper’s `payTo` in `KeeperRegistry`, or
+  - caller address by default.
+- Optional:
+  - protocol fee via `feeSink` + `feeBps`,
+  - scoring hooks via `KeeperRegistry`.
+
+**RedemptionRouter**
+- Wraps Mezo’s TroveManager redemption paths.
+- Supports:
+  - hinted redemptions for efficient bulk operations,
+  - a simplified quick mode for smaller/interactive use.
+- Stateless and integrator-friendly.
+
+**KeeperRegistry**
+- Maps keeper addresses to:
+  - optional `payTo` payout address,
+  - score (if utilized),
+  - future flags.
+- Keeps keeper configuration visible and queryable on-chain.
+
+**VaultManager (MVP)**
+- Users opt in:
+  - set redeem parameters and keeper fee,
+  - deposit MUSD.
+- Any keeper can:
+  - call `execute(user, price)` → triggers `RedemptionRouter`.
+- Keeper:
+  - earns a fee in MUSD from the user’s balance.
+- User:
+  - gets redemptions executed without manual calls.
+- Intended as a pattern example, not a final policy engine.
+
+**YieldAggregator (stub)**
+- Receives MUSD/rewards in demo flows.
+- Demonstrates how real yield strategies could attach later.
+- Intentionally non-opinionated.
 
 ---
 
-## Motivation
+### Roadmap (beyond hackathon)
 
-MUSD stability depends on timely liquidations and redemptions, but running private keepers is complex. TrovePilot turns these core mechanisms into permissionless, reusable, on‑chain modules and a simple UI—so anyone can participate in peg maintenance, earn keeper rewards, and strengthen Mezo’s decentralization.
+Potential next steps:
+- **Policy-based vault protection**
+  - automated triggers (LTV, volatility),
+  - partial redemptions / top-ups.
+- **Keeper marketplace**
+  - richer scoring,
+  - stake/slash mechanics,
+  - competition for best execution.
+- **MUSD yield routing**
+  - curated strategies for idle balances,
+  - visible risk controls.
+- **Monitoring & alerts**
+  - real-time analytics,
+  - Telegram/Discord/webhook integrations.
+- **Productionization**
+  - audits,
+  - extended tests,
+  - griefing & gas-efficiency analysis.
 
 ---
 
-## License
+### Motivation
 
-MIT
+Relying on closed, private keeper infra for peg defense creates:
+ - concentration risk,
+ - limited accountability,
+ - high barriers to entry.
+
+TrovePilot explores the opposite direction:
+ - **Permissionless** – execution and incentives codified on-chain.
+ - **Composable** – use any module independently or together.
+ - **Transparent** – every job and payout is inspectable.
+ - **MUSD-centric** – flows fund and reward in MUSD, reinforcing its role in Mezo.
+
+The long-term goal:
+>Make Mezo’s peg defense and maintenance an open, auditable, community-aligned process.
+
+---
+
+### License
+
+MIT © VitalR / TrovePilot contributors

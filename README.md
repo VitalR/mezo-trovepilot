@@ -1,230 +1,107 @@
-# TrovePilot
+# TrovePilot v2 — Mezo Keeper Execution Toolkit
 
-**Permissionless keeper automation for Mezo MUSD**
+**Version:** December 2025  
+**Status:** Active Development (v2)
 
-TrovePilot is a composable, on-chain automation layer for the Mezo stablecoin ecosystem.
+TrovePilot v2 is a lightweight, permissionless execution toolkit designed to help community keepers interact safely and efficiently with **Mezo’s liquidation and redemption flows**.
 
-It focuses on:
-- batching liquidations,
-- streamlining redemptions, and
-- enabling an open, transparent keeper economy around MUSD.
+It provides:
+- Clean contract wrappers for liquidation & redemption  
+- Execution primitives for redemption loops (via Tigris)  
+- Reference off-chain bots for liquidations, redemptions, and loops  
+- TypeScript SDK for custom keeper strategies  
 
-Built during the **Mezo Hackathon 2025** (Advanced DeFi Solutions track).
+TrovePilot v2 follows Mezo’s automation philosophy:
 
-> **Protocol-first:** TrovePilot is designed primarily as **infrastructure**.  
-> The core value lives in the smart contracts (liquidation, redemption, keeper logic).  
-> The Next.js dashboard is a minimal reference client to visualize how these pieces work on Mezo testnet—not a finished consumer product.
+> **“Thin on-chain, logic off-chain.”**
 
----
-
-## Why it matters
-
-MUSD stability and healthy trove management depend on timely liquidations and redemptions.
-
-Today, this kind of maintenance is often:
-- concentrated in a few private bots,
-- opaque to users,
-- hard to join as an independent keeper.
-
-**TrovePilot** aims to turn that into:
-
-- **Open peg defense** – replaces closed infra with verifiable, on-chain executors.
-- **Real MUSD utility** – MUSD is used for funding actions, rewarding keepers, and routing flows.
-- **Composable infra** – small modules that plug directly into Mezo’s TroveManager, SortedTroves, and oracle stack.
-- **Permissionless participation** – anyone can integrate, run keepers, or build on top.
+The on-chain layer stays minimal and transparent, while all strategy and automation runs off-chain through open-source bots and the TrovePilot SDK.
 
 ---
 
-## What’s inside
+### Key Objectives
 
-**Core contracts and components**
-
-| Module | Function |
-|:--|:--|
-| **LiquidationEngine** | Batches liquidations, handles retries, indexes jobs on-chain, forwards rewards (with optional fees & scoring) |
-| **RedemptionRouter** | Wraps TroveManager; supports hinted redemptions + “quick mode” for small redemptions |
-| **KeeperRegistry** | Tracks keeper metadata (e.g. `payTo`, score) and enables transparent payout routing |
-| **VaultManager (MVP)** | Lets users pre-fund MUSD so any keeper can execute small redemptions on their behalf for a fee |
-| **YieldAggregator (stub)** | Placeholder sink to demonstrate how automated MUSD routing/compounding could plug in |
-| **UI (Next.js)** | Lightweight dashboard with demo mode, contract references, keeper console, and activity feed |
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams and flows.
+- Make Mezo’s liquidation and redemption flows easier to use  
+- Provide clean on-chain wrappers with minimal logic  
+- Enable off-chain bots to simulate & decide strategies safely  
+- Avoid any overlap with SafetyBuffer or protocol-owned capital  
+- Support a decentralized keeper ecosystem
 
 ---
 
-## Status & scope
+### Architecture Overview
 
-This repository is a **hackathon prototype**, not production code.
+TrovePilot v2 follows a strict separation:
 
-**Included**
+**Off-chain (strategy)**
+- Keeper bots  
+- SDK for calldata  
+- Monitoring & simulation  
+- Profitability decision-making
 
-- Working, verifiable contracts on Mezo testnet.
-- Deterministic deployment & verification scripts.
-- Demo-focused dashboard with Demo Mode + Live wiring.
-- Example flows for:
-  - batched liquidations,
-  - hinted/quick redemptions,
-  - opt-in vault automation via `VaultManager`.
+**On-chain (execution)**
+- Stateless wrapper contracts  
+- Batch liquidation  
+- Redemption with hints  
+- DEX swaps (Tigris)  
+- Redemption-loop executor
 
-**Not (yet) included**
+Detailed architecture:  
+[`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md)
 
-- Formal audits / full production hardening.
-- Complete keeper marketplace, slashing, or complex incentive logic.
-- Production-grade UX for non-technical users.
-- Finalized yield routes or continuous policy engines.
+---
+### On-Chain Components (v2)
 
-The design is intentionally modular so it can be extended with Mezo and the community.
+| Contract | Responsibility |
+|----------|----------------|
+| `LiquidationEngine` | Batch + fallback liquidation execution |
+| `RedemptionRouter` | Quick-mode or hint-assisted redemption |
+| `RedemptionLoopExecutor` | swap → redeem → optional rebalance |
+| `DexAdapter_Tigris` | Minimal DEX wrapper for swaps |
+
+Full contract reference:  
+[`CONTRACTS_V2.md`](./CONTRACTS_V2.md)
 
 ---
 
-## Getting started
+### Off-Chain Components (v2)
 
-Configuration details live in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
+- `@trovepilot/sdk` — calldata generation  
+- Keeper bots (reference implementations):  
+  - liquidation bot  
+  - redemption bot  
+  - redemption-loop bot  
+- Monitoring / profitability scripts  
+- Optional dashboard (analytics, job history)
 
-Use the provided `make` targets for reproducible flows.
+---
 
-### Prereqs
+### Roadmap
 
-- [Foundry](https://book.getfoundry.sh/getting-started/installation) (`forge`, `cast`)
-- Mezo testnet RPC
-- EVM wallet funded with gas on Mezo testnet (tBTC as gas)
+High-level roadmap from mission → mainnet:  
+[`MISSION_AND_ROADMAP.md`](./MISSION_AND_ROADMAP.md)
 
-### Install & build
+---
 
-```bash
-make install
-make build
+### Migration Guide
+
+Migrating from hackathon v1 to v2:  
+[`MIGRATION_V1_TO_V2.md`](./MIGRATION_V1_TO_V2.md)
+
+---
+
+### Build
+constacts:
+```
+forge install
+forge test
 ```
 
-Run tests
-```bash
-# Local / unit tests
-make test
-
-# Against a Mezo fork (requires MEZO_RPC in .env.testnet)
-make test-fork
+bots:
 ```
-
-Deploy to Mezo testnet
-```bash
-# Uses .env.testnet:
-# MEZO_RPC, DEPLOYER_PRIVATE_KEY, plus optional flags
-make deploy-testnet
+npm install
+npm run dev
 ```
-
-Run the demo flow
-```bash
-make demo-testnet
-```
-
-Export ABIs
-```bash
-make abi
-```
-
-### UI (Next.js) — reference dashboard
-
-The `ui` package is a thin reference client to:
-- display live contract addresses and status,
-- run a guided “Automation Story”,
-- provide a keeper console for job submission,
-- show a simple activity feed.
-
-Quick start:
-1. `cd ui && npm i`
-2. Create `ui/.env.local` (see [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for all keys)
-3. `npm run dev` → open http://localhost:3000
-
-Notes:
-- `Demo Mode`: uses scripted data; no wallet needed.
-- `Live Mode`: uses your configured Mezo RPC + contracts for real calls.
-- Trove suggestions can come from `SortedTroves` or from a fallback list exported by the helper scripts.
-
----
-
-### Contract details (high level)
-
-**LiquidationEngine**
-- Batches or loops through trove sets (best-effort, non-reverting).
-- Records job metadata on-chain for easy indexing.
-- Forwards rewards to:
-  - keeper’s `payTo` in `KeeperRegistry`, or
-  - caller address by default.
-- Optional:
-  - protocol fee via `feeSink` + `feeBps`,
-  - scoring hooks via `KeeperRegistry`.
-
-**RedemptionRouter**
-- Wraps Mezo’s TroveManager redemption paths.
-- Supports:
-  - hinted redemptions for efficient bulk operations,
-  - a simplified quick mode for smaller/interactive use.
-- Stateless and integrator-friendly.
-
-**KeeperRegistry**
-- Maps keeper addresses to:
-  - optional `payTo` payout address,
-  - score (if utilized),
-  - future flags.
-- Keeps keeper configuration visible and queryable on-chain.
-
-**VaultManager (MVP)**
-- Users opt in:
-  - set redeem parameters and keeper fee,
-  - deposit MUSD.
-- Any keeper can:
-  - call `execute(user, price)` → triggers `RedemptionRouter`.
-- Keeper:
-  - earns a fee in MUSD from the user’s balance.
-- User:
-  - gets redemptions executed without manual calls.
-- Intended as a pattern example, not a final policy engine.
-
-**YieldAggregator (stub)**
-- Receives MUSD/rewards in demo flows.
-- Demonstrates how real yield strategies could attach later.
-- Intentionally non-opinionated.
-
----
-
-### Roadmap (beyond hackathon)
-
-Potential next steps:
-- **Policy-based vault protection**
-  - automated triggers (LTV, volatility),
-  - partial redemptions / top-ups.
-- **Keeper marketplace**
-  - richer scoring,
-  - stake/slash mechanics,
-  - competition for best execution.
-- **MUSD yield routing**
-  - curated strategies for idle balances,
-  - visible risk controls.
-- **Monitoring & alerts**
-  - real-time analytics,
-  - Telegram/Discord/webhook integrations.
-- **Productionization**
-  - audits,
-  - extended tests,
-  - griefing & gas-efficiency analysis.
-
----
-
-### Motivation
-
-Relying on closed, private keeper infra for peg defense creates:
- - concentration risk,
- - limited accountability,
- - high barriers to entry.
-
-TrovePilot explores the opposite direction:
- - **Permissionless** – execution and incentives codified on-chain.
- - **Composable** – use any module independently or together.
- - **Transparent** – every job and payout is inspectable.
- - **MUSD-centric** – flows fund and reward in MUSD, reinforcing its role in Mezo.
-
-The long-term goal:
->Make Mezo’s peg defense and maintenance an open, auditable, community-aligned process.
 
 ---
 

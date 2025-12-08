@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {Test} from "forge-std/Test.sol";
+import { Test } from "forge-std/Test.sol";
 
-import {LiquidationEngine} from "../src/LiquidationEngine.sol";
-import {MockTroveManager, MockERC20} from "./utils/Mocks.t.sol";
+import { LiquidationEngine } from "../src/LiquidationEngine.sol";
+import { MockTroveManager, MockERC20 } from "./utils/Mocks.t.sol";
 
 contract LiquidationEngineTest is Test {
     MockTroveManager tm;
@@ -49,6 +49,20 @@ contract LiquidationEngineTest is Test {
         assertEq(engine.jobId(), 1);
     }
 
+    function test_liquidation_rewards_forwarded_to_keeper_batch() public {
+        tm.setRewardNative(1 ether);
+        vm.deal(address(tm), 1 ether);
+
+        address[] memory borrowers = new address[](1);
+        borrowers[0] = address(1);
+
+        vm.prank(keeper);
+        vm.expectEmit(false, false, false, false); // no event for payout, only balance change
+        engine.liquidateRange(borrowers, false);
+
+        assertEq(address(keeper).balance, 1 ether);
+    }
+
     function test_liquidation_fallback_partial_success() public {
         tm.setRevertBatch(true);
         tm.setRevertSingle(address(2), true);
@@ -74,17 +88,21 @@ contract LiquidationEngineTest is Test {
         engine.liquidateRange(borrowers, false);
     }
 
-    function test_sweep_native_and_token() public {
+    function test_sweep_native_and_token_only_owner() public {
         // Native
         vm.deal(address(engine), 1 ether);
+        engine.transferOwnership(keeper);
+        engine.transferOwnership(keeper);
         vm.prank(keeper);
-        engine.sweep(address(0));
+        engine.acceptOwnership();
+        vm.prank(keeper);
+        engine.sweep(address(0), keeper);
         assertEq(address(keeper).balance, 1 ether);
 
         // Token
         token.mint(address(engine), 5 ether);
         vm.prank(keeper);
-        engine.sweep(address(token));
+        engine.sweep(address(token), keeper);
         assertEq(token.balanceOf(keeper), 5 ether);
     }
 }

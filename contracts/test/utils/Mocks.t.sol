@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-import {ITroveManager} from "../../src/interfaces/ITroveManager.sol";
-import {IHintHelpers} from "../../src/interfaces/IHintHelpers.sol";
-import {ISortedTroves} from "../../src/interfaces/ISortedTroves.sol";
+import { ITroveManager } from "../../src/interfaces/ITroveManager.sol";
+import { IHintHelpers } from "../../src/interfaces/IHintHelpers.sol";
+import { ISortedTroves } from "../../src/interfaces/ISortedTroves.sol";
 
 contract MockTroveManager is ITroveManager {
     bool public revertBatch;
     mapping(address => bool) public revertSingle;
+    uint256 public rewardNative;
 
     address[] public lastBatch;
     uint256 public singleCalls;
@@ -26,6 +27,10 @@ contract MockTroveManager is ITroveManager {
 
     RedeemCall public lastRedeem;
 
+    function setRewardNative(uint256 value) external {
+        rewardNative = value;
+    }
+
     function setRevertBatch(bool v) external {
         revertBatch = v;
     }
@@ -37,11 +42,19 @@ contract MockTroveManager is ITroveManager {
     function liquidate(address _borrower) external override {
         if (revertSingle[_borrower]) revert("single revert");
         singleCalls++;
+        if (rewardNative != 0) {
+            (bool ok,) = payable(msg.sender).call{ value: rewardNative }("");
+            require(ok, "reward fail");
+        }
     }
 
     function batchLiquidate(address[] calldata _borrowers) external override {
         lastBatch = _borrowers;
         if (revertBatch) revert("batch revert");
+        if (rewardNative != 0) {
+            (bool ok,) = payable(msg.sender).call{ value: rewardNative }("");
+            require(ok, "reward fail");
+        }
     }
 
     function lastBatchLength() external view returns (uint256) {

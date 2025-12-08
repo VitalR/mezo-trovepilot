@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-import {ITroveManager} from "./interfaces/ITroveManager.sol";
-import {Errors} from "./utils/Errors.sol";
+import { ITroveManager } from "./interfaces/ITroveManager.sol";
+import { Errors } from "./utils/Errors.sol";
 
 /// @title TrovePilot LiquidationEngine
 /// @notice Minimal, permissionless liquidation executor for Mezo troves with deterministic fallback behavior.
 /// @dev Stateless aside from a monotonic `jobId`. No fees, no governance, no scoring.
 ///      Spec reference: docs/CONTRACTS_V2.md (LiquidationEngine).
 /// @custom:invariant Only state is `jobId`; no custodial balances should remain post-sweep.
-contract LiquidationEngine is ReentrancyGuard {
+contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /// @notice Emitted after a liquidation attempt completes.
@@ -26,6 +27,13 @@ contract LiquidationEngine is ReentrancyGuard {
         uint256 indexed jobId, address indexed keeper, uint256 attempted, uint256 succeeded, bool fallbackUsed
     );
 
+    /// @notice Emitted when funds are swept out of the contract.
+    /// @param caller    Address that initiated the sweep (owner).
+    /// @param token     Token swept; address(0) for native.
+    /// @param amount    Amount transferred.
+    /// @param recipient Destination receiving the swept funds.
+    event SweepExecuted(address indexed caller, address indexed token, uint256 amount, address indexed recipient);
+
     /// @notice TroveManager proxy used for liquidations.
     ITroveManager public immutable troveManager;
 
@@ -33,8 +41,8 @@ contract LiquidationEngine is ReentrancyGuard {
     uint256 public jobId;
 
     /// @param _troveManager TroveManager proxy address.
-    constructor(address _troveManager) {
-        require(_troveManager != address(0), Errors.ZeroAddress());
+    constructor(address _troveManager) Ownable(msg.sender) {
+        if (_troveManager == address(0)) revert Errors.ZeroAddress();
         troveManager = ITroveManager(_troveManager);
     }
 
@@ -50,6 +58,7 @@ contract LiquidationEngine is ReentrancyGuard {
         nonReentrant
         returns (uint256 succeeded)
     {
+        uint256 balanceBefore = address(this).balance;
         uint256 len = borrowers.length;
         require(len > 0, Errors.EmptyArray());
 
@@ -73,32 +82,45 @@ contract LiquidationEngine is ReentrancyGuard {
                         unchecked {
                             ++succeeded;
                         }
-                    } catch {}
+                    } catch { }
                 }
             }
+        }
+
+        uint256 balanceAfter = address(this).balance;
+        if (balanceAfter > balanceBefore) {
+            uint256 reward = balanceAfter - balanceBefore;
+            (bool ok,) = msg.sender.call{ value: reward }("");
+            if (!ok) revert Errors.RewardPayoutFailed();
         }
 
         emit LiquidationExecuted(++jobId, msg.sender, len, succeeded, fallbackUsed);
     }
 
-    /// @notice Sweep the full balance of a token or native coin to the caller.
-    /// @dev Escape hatch to prevent accidental custody; permissionless and always pays `msg.sender`.
-    /// @param token Address of token to sweep; use address(0) for native coin.
-    function sweep(address token) external nonReentrant {
-        if (token == address(0)) {
+    /// @notice Emergency escape hatch. Should never be required during normal operation.
+    /// @dev Sweeps full balance of a token or native coin to `_recipient`.
+    /// @param _token Address of token to sweep; use address(0) for native coin.
+    /// @param _recipient Recipient of the swept balance.
+    function sweep(address _token, address _recipient) external onlyOwner nonReentrant {
+        if (_recipient == address(0)) revert Errors.ZeroAddress();
+
+        if (_token == address(0)) {
             uint256 bal = address(this).balance;
             if (bal != 0) {
-                (bool ok,) = payable(msg.sender).call{value: bal}("");
-                require(ok, Errors.NativeTransferFailed());
+                (bool ok,) = payable(_recipient).call{ value: bal }("");
+                if (!ok) revert Errors.NativeTransferFailed();
+                emit SweepExecuted(msg.sender, _token, bal, _recipient);
             }
             return;
         }
-        uint256 balErc = IERC20(token).balanceOf(address(this));
+
+        uint256 balErc = IERC20(_token).balanceOf(address(this));
         if (balErc != 0) {
-            IERC20(token).safeTransfer(msg.sender, balErc);
+            IERC20(_token).safeTransfer(_recipient, balErc);
+            emit SweepExecuted(msg.sender, _token, balErc, _recipient);
         }
     }
 
     /// @notice Accept native refunds routed back from Mezo liquidations.
-    receive() external payable {}
+    receive() external payable { }
 }

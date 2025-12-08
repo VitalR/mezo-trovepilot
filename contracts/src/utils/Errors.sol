@@ -20,4 +20,7 @@ library Errors {
 
     /// @notice Reverts when a native token transfer fails.
     error NativeTransferFailed();
+
+    /// @notice Reverts when liquidation reward cannot be forwarded.
+    error RewardPayoutFailed();
 }

@@ -57,9 +57,24 @@ contract LiquidationEngineTest is Test {
         borrowers[0] = address(1);
 
         vm.prank(keeper);
-        vm.expectEmit(false, false, false, false); // no event for payout, only balance change
         engine.liquidateRange(borrowers, false);
 
+        assertEq(address(keeper).balance, 1 ether);
+    }
+
+    function test_liquidation_rewards_forwarded_to_keeper_fallback() public {
+        tm.setRewardNative(0.5 ether);
+        tm.setRevertBatch(true);
+        vm.deal(address(tm), 1 ether);
+
+        address[] memory borrowers = new address[](2);
+        borrowers[0] = address(1);
+        borrowers[1] = address(2);
+
+        vm.prank(keeper);
+        engine.liquidateRange(borrowers, true);
+
+        // Two single liquidations each pay 0.5 ether to engine; engine forwards 1 ether to keeper.
         assertEq(address(keeper).balance, 1 ether);
     }
 
@@ -106,4 +121,3 @@ contract LiquidationEngineTest is Test {
         assertEq(token.balanceOf(keeper), 5 ether);
     }
 }
-

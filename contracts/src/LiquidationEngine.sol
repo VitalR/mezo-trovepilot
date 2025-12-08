@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import { ITroveManager } from "./interfaces/ITroveManager.sol";
-import { Errors } from "./utils/Errors.sol";
+import {ITroveManager} from "./interfaces/ITroveManager.sol";
+import {Errors} from "./utils/Errors.sol";
 
 /// @title TrovePilot LiquidationEngine
 /// @notice Minimal, permissionless liquidation executor for Mezo troves with deterministic fallback behavior.
@@ -34,15 +34,15 @@ contract LiquidationEngine is ReentrancyGuard {
 
     /// @param _troveManager TroveManager proxy address.
     constructor(address _troveManager) {
-        if (_troveManager == address(0)) revert Errors.ZeroAddress();
+        require(_troveManager != address(0), Errors.ZeroAddress());
         troveManager = ITroveManager(_troveManager);
     }
 
     /// @notice Execute liquidations against provided borrowers.
     /// @dev Deterministic behavior:
     ///      - If `fallbackOnFail` is false, only `batchLiquidate` is attempted and will bubble the revert.
-    ///      - If `fallbackOnFail` is true, try `batchLiquidate`; on revert attempt single `liquidate` per borrower once.
-    /// @param borrowers List of troves to liquidate.
+    ///      - If `fallbackOnFail` is true, try `batchLiquidate`; on revert attempt single `liquidate` per borrower
+    /// once. @param borrowers List of troves to liquidate.
     /// @param fallbackOnFail Whether to fall back to per-borrower loop if batch reverts.
     /// @return succeeded Number of successful liquidations.
     function liquidateRange(address[] calldata borrowers, bool fallbackOnFail)
@@ -51,7 +51,7 @@ contract LiquidationEngine is ReentrancyGuard {
         returns (uint256 succeeded)
     {
         uint256 len = borrowers.length;
-        if (len == 0) revert Errors.EmptyArray();
+        require(len > 0, Errors.EmptyArray());
 
         bool fallbackUsed = false;
         bool batchSuccess = true;
@@ -73,7 +73,7 @@ contract LiquidationEngine is ReentrancyGuard {
                         unchecked {
                             ++succeeded;
                         }
-                    } catch { }
+                    } catch {}
                 }
             }
         }
@@ -88,8 +88,8 @@ contract LiquidationEngine is ReentrancyGuard {
         if (token == address(0)) {
             uint256 bal = address(this).balance;
             if (bal != 0) {
-                (bool ok,) = payable(msg.sender).call{ value: bal }("");
-                if (!ok) revert Errors.NativeTransferFailed();
+                (bool ok,) = payable(msg.sender).call{value: bal}("");
+                require(ok, Errors.NativeTransferFailed());
             }
             return;
         }
@@ -100,5 +100,5 @@ contract LiquidationEngine is ReentrancyGuard {
     }
 
     /// @notice Accept native refunds routed back from Mezo liquidations.
-    receive() external payable { }
+    receive() external payable {}
 }

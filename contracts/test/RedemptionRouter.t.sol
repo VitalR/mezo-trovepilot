@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import { Test } from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
-import { RedemptionRouter } from "../src/RedemptionRouter.sol";
-import { Errors } from "../src/utils/Errors.sol";
-import { MockTroveManager, MockHintHelpers, MockSortedTroves } from "./utils/Mocks.t.sol";
+import {RedemptionRouter} from "../src/RedemptionRouter.sol";
+import {Errors} from "../src/utils/Errors.sol";
+import {MockTroveManager, MockHintHelpers, MockSortedTroves} from "./utils/Mocks.t.sol";
 
 contract RedemptionRouterTest is Test {
     MockTroveManager tm;

@@ -3,8 +3,8 @@ pragma solidity 0.8.30;
 
 import "forge-std/Script.sol";
 
-import { MezoAddresses } from "./MezoAddresses.sol";
-import { IPriceOracle } from "../src/interfaces/IPriceOracle.sol";
+import {MezoAddresses} from "./MezoAddresses.sol";
+import {IPriceOracle} from "../src/interfaces/IPriceOracle.sol";
 
 contract OracleCheckScript is Script {
     function run() external {

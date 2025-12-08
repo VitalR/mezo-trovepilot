@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import { ITroveManager } from "./interfaces/ITroveManager.sol";
-import { IHintHelpers } from "./interfaces/IHintHelpers.sol";
-import { ISortedTroves } from "./interfaces/ISortedTroves.sol";
+import {ITroveManager} from "./interfaces/ITroveManager.sol";
+import {IHintHelpers} from "./interfaces/IHintHelpers.sol";
+import {ISortedTroves} from "./interfaces/ISortedTroves.sol";
 
-import { Errors } from "./utils/Errors.sol";
+import {Errors} from "./utils/Errors.sol";
 
 /// @title TrovePilot RedemptionRouter
 /// @notice Minimal, permissionless wrapper around `TroveManager.redeemCollateral` exposing quick and hinted flows.
@@ -40,7 +40,7 @@ contract RedemptionRouter {
     /// @param _hints HintHelpers address.
     /// @param _sorted SortedTroves address.
     constructor(address _tm, address _hints, address _sorted) {
-        if (_tm == address(0) || _hints == address(0) || _sorted == address(0)) revert Errors.ZeroAddress();
+        require(_tm != address(0) && _hints != address(0) && _sorted != address(0), Errors.ZeroAddress());
         tm = ITroveManager(_tm);
         hints = IHintHelpers(_hints);
         sorted = ISortedTroves(_sorted);
@@ -50,7 +50,7 @@ contract RedemptionRouter {
     /// @dev Matches Mezo Option A (no hints). All hints/NICR/iterations set to zero.
     /// @param _musdAmount Amount of MUSD to redeem; must be > 0.
     function redeemQuick(uint256 _musdAmount) external {
-        if (_musdAmount == 0) revert Errors.ZeroAmount();
+        require(_musdAmount > 0, Errors.ZeroAmount());
         tm.redeemCollateral(_musdAmount, address(0), address(0), address(0), 0, 0);
         emit RedemptionExecuted(++jobId, msg.sender, _musdAmount, _musdAmount, 0, false);
     }
@@ -65,9 +65,9 @@ contract RedemptionRouter {
     function redeemHinted(uint256 _musdAmount, uint256 _price, uint256 _maxIter, address _upperSeed, address _lowerSeed)
         external
     {
-        if (_musdAmount == 0) revert Errors.ZeroAmount();
+        require(_musdAmount > 0, Errors.ZeroAmount());
         (address first, uint256 nicr, uint256 truncated) = hints.getRedemptionHints(_musdAmount, _price, _maxIter);
-        if (_musdAmount != truncated) revert Errors.TruncatedMismatch(truncated);
+        require(_musdAmount == truncated, Errors.TruncatedMismatch(truncated));
 
         (address upper, address lower) = sorted.findInsertPosition(nicr, _upperSeed, _lowerSeed);
         tm.redeemCollateral(_musdAmount, first, upper, lower, nicr, _maxIter);

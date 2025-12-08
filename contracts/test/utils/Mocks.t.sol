@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-import { ITroveManager } from "../../src/interfaces/ITroveManager.sol";
-import { IHintHelpers } from "../../src/interfaces/IHintHelpers.sol";
-import { ISortedTroves } from "../../src/interfaces/ISortedTroves.sol";
+import {ITroveManager} from "../../src/interfaces/ITroveManager.sol";
+import {IHintHelpers} from "../../src/interfaces/IHintHelpers.sol";
+import {ISortedTroves} from "../../src/interfaces/ISortedTroves.sol";
 
 contract MockTroveManager is ITroveManager {
     bool public revertBatch;

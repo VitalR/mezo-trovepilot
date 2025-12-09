@@ -20,4 +20,3 @@ interface ITroveManager {
         uint256 _maxIterations
     ) external;
 }
-

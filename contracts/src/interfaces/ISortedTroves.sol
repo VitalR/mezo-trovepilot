@@ -10,4 +10,3 @@ interface ISortedTroves {
         view
         returns (address upperHint, address lowerHint);
 }
-

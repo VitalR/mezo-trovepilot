@@ -13,4 +13,3 @@ interface IHintHelpers {
         view
         returns (address firstRedemptionHint, uint256 partialRedemptionHintNICR, uint256 truncatedMUSDamount);
 }
-

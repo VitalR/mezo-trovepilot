@@ -23,6 +23,7 @@ remappings = [
 ]
 
 [fmt]
+exclude=["lib", "./lib"]
 tab_width = 4
 line_length = 120
 bracket_spacing = true

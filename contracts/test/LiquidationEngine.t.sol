@@ -78,6 +78,18 @@ contract LiquidationEngineTest is Test {
         assertEq(address(keeper).balance, 1 ether);
     }
 
+    function test_liquidation_fallback_flag_when_batch_succeeds() public {
+        address[] memory borrowers = new address[](1);
+        borrowers[0] = address(1);
+
+        vm.prank(keeper);
+        uint256 succeeded = engine.liquidateRange(borrowers, true);
+
+        assertEq(succeeded, 1);
+        assertEq(engine.jobId(), 1);
+        assertEq(tm.singleCalls(), 0);
+    }
+
     function test_liquidation_fallback_partial_success() public {
         tm.setRevertBatch(true);
         tm.setRevertSingle(address(2), true);
@@ -103,6 +115,12 @@ contract LiquidationEngineTest is Test {
         engine.liquidateRange(borrowers, false);
     }
 
+    function test_revert_on_empty_borrowers() public {
+        address[] memory borrowers = new address[](0);
+        vm.expectRevert();
+        engine.liquidateRange(borrowers, false);
+    }
+
     function test_sweep_native_and_token_only_owner() public {
         // Native
         vm.deal(address(engine), 1 ether);
@@ -119,5 +137,16 @@ contract LiquidationEngineTest is Test {
         vm.prank(keeper);
         engine.sweep(address(token), keeper);
         assertEq(token.balanceOf(keeper), 5 ether);
+    }
+
+    function test_sweep_revert_zero_recipient() public {
+        vm.expectRevert();
+        engine.sweep(address(0), address(0));
+    }
+
+    function test_sweep_noop_zero_balances() public {
+        // Owner calls sweep on empty balances; should not revert.
+        engine.sweep(address(0), address(this));
+        engine.sweep(address(token), address(this));
     }
 }

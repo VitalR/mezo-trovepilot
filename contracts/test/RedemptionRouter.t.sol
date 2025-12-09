@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {Test} from "forge-std/Test.sol";
+import { Test } from "forge-std/Test.sol";
 
-import {RedemptionRouter} from "../src/RedemptionRouter.sol";
-import {Errors} from "../src/utils/Errors.sol";
-import {MockTroveManager, MockHintHelpers, MockSortedTroves} from "./utils/Mocks.t.sol";
+import { RedemptionRouter } from "../src/RedemptionRouter.sol";
+import { Errors } from "../src/utils/Errors.sol";
+import { MockTroveManager, MockHintHelpers, MockSortedTroves } from "./utils/Mocks.t.sol";
 
 contract RedemptionRouterTest is Test {
     MockTroveManager tm;
@@ -37,6 +37,11 @@ contract RedemptionRouterTest is Test {
         assertEq(router.jobId(), 1);
     }
 
+    function test_redeem_quick_reverts_on_zero_amount() public {
+        vm.expectRevert();
+        router.redeemQuick(0);
+    }
+
     function test_revert_redeem_hinted_on_truncated_mismatch() public {
         hints.setHints(address(11), 123, 50);
         sorted.setInsert(address(21), address(22));
@@ -61,5 +66,10 @@ contract RedemptionRouterTest is Test {
         assertEq(rc.nicr, 123);
         assertEq(rc.maxIter, 10);
         assertEq(router.jobId(), 1);
+    }
+
+    function test_redeem_hinted_reverts_on_zero_amount() public {
+        vm.expectRevert();
+        router.redeemHinted(0, 2000, 10, address(5), address(6));
     }
 }

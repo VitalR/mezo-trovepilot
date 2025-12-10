@@ -4,7 +4,6 @@ pragma solidity 0.8.30;
 import { ITroveManager } from "./interfaces/ITroveManager.sol";
 import { IHintHelpers } from "./interfaces/IHintHelpers.sol";
 import { ISortedTroves } from "./interfaces/ISortedTroves.sol";
-
 import { Errors } from "./utils/Errors.sol";
 
 /// @title TrovePilot RedemptionRouter
@@ -28,11 +27,11 @@ contract RedemptionRouter {
     );
 
     /// @notice TroveManager proxy used to perform redemptions.
-    ITroveManager public immutable tm;
+    ITroveManager public immutable TROVE_MANAGER;
     /// @notice HintHelpers contract used to compute redemption hints.
-    IHintHelpers public immutable hints;
+    IHintHelpers public immutable HINT_HELPERS;
     /// @notice SortedTroves contract used to compute insert positions.
-    ISortedTroves public immutable sorted;
+    ISortedTroves public immutable SORTED_TROVES;
     /// @notice Monotonic identifier for off-chain indexing.
     uint256 public jobId;
 
@@ -41,9 +40,9 @@ contract RedemptionRouter {
     /// @param _sorted SortedTroves address.
     constructor(address _tm, address _hints, address _sorted) {
         require(_tm != address(0) && _hints != address(0) && _sorted != address(0), Errors.ZeroAddress());
-        tm = ITroveManager(_tm);
-        hints = IHintHelpers(_hints);
-        sorted = ISortedTroves(_sorted);
+        TROVE_MANAGER = ITroveManager(_tm);
+        HINT_HELPERS = IHintHelpers(_hints);
+        SORTED_TROVES = ISortedTroves(_sorted);
     }
 
     /// @notice Quick redemption without hints (higher gas).
@@ -51,7 +50,7 @@ contract RedemptionRouter {
     /// @param _musdAmount Amount of MUSD to redeem; must be > 0.
     function redeemQuick(uint256 _musdAmount) external {
         require(_musdAmount > 0, Errors.ZeroAmount());
-        tm.redeemCollateral(_musdAmount, address(0), address(0), address(0), 0, 0);
+        TROVE_MANAGER.redeemCollateral(_musdAmount, address(0), address(0), address(0), 0, 0);
         emit RedemptionExecuted(++jobId, msg.sender, _musdAmount, _musdAmount, 0, false);
     }
 
@@ -66,11 +65,12 @@ contract RedemptionRouter {
         external
     {
         require(_musdAmount > 0, Errors.ZeroAmount());
-        (address first, uint256 nicr, uint256 truncated) = hints.getRedemptionHints(_musdAmount, _price, _maxIter);
+        (address first, uint256 nicr, uint256 truncated) =
+            HINT_HELPERS.getRedemptionHints(_musdAmount, _price, _maxIter);
         require(_musdAmount == truncated, Errors.TruncatedMismatch(truncated));
 
-        (address upper, address lower) = sorted.findInsertPosition(nicr, _upperSeed, _lowerSeed);
-        tm.redeemCollateral(_musdAmount, first, upper, lower, nicr, _maxIter);
+        (address upper, address lower) = SORTED_TROVES.findInsertPosition(nicr, _upperSeed, _lowerSeed);
+        TROVE_MANAGER.redeemCollateral(_musdAmount, first, upper, lower, nicr, _maxIter);
         emit RedemptionExecuted(++jobId, msg.sender, _musdAmount, truncated, _maxIter, true);
     }
 }

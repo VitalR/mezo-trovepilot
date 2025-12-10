@@ -35,22 +35,23 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     event SweepExecuted(address indexed caller, address indexed token, uint256 amount, address indexed recipient);
 
     /// @notice TroveManager proxy used for liquidations.
-    ITroveManager public immutable troveManager;
+    ITroveManager public immutable TROVE_MANAGER;
 
     /// @notice Monotonic identifier for off-chain indexing.
     uint256 public jobId;
 
     /// @param _troveManager TroveManager proxy address.
     constructor(address _troveManager) Ownable(msg.sender) {
-        if (_troveManager == address(0)) revert Errors.ZeroAddress();
-        troveManager = ITroveManager(_troveManager);
+        require(_troveManager != address(0), Errors.ZeroAddress());
+        TROVE_MANAGER = ITroveManager(_troveManager);
     }
 
     /// @notice Execute liquidations against provided borrowers.
     /// @dev Deterministic behavior:
     ///      - If `fallbackOnFail` is false, only `batchLiquidate` is attempted and will bubble the revert.
     ///      - If `fallbackOnFail` is true, try `batchLiquidate`; on revert attempt single `liquidate` per borrower
-    /// once. @param borrowers List of troves to liquidate.
+    /// once.
+    /// @param borrowers List of troves to liquidate.
     /// @param fallbackOnFail Whether to fall back to per-borrower loop if batch reverts.
     /// @return succeeded Number of successful liquidations.
     function liquidateRange(address[] calldata borrowers, bool fallbackOnFail)
@@ -66,10 +67,10 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
         bool batchSuccess = true;
 
         if (!fallbackOnFail) {
-            troveManager.batchLiquidate(borrowers);
+            TROVE_MANAGER.batchLiquidate(borrowers);
             succeeded = len;
         } else {
-            try troveManager.batchLiquidate(borrowers) {
+            try TROVE_MANAGER.batchLiquidate(borrowers) {
                 succeeded = len;
             } catch {
                 batchSuccess = false;
@@ -78,7 +79,7 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
 
             if (!batchSuccess) {
                 for (uint256 i = 0; i < len; ++i) {
-                    try troveManager.liquidate(borrowers[i]) {
+                    try TROVE_MANAGER.liquidate(borrowers[i]) {
                         unchecked {
                             ++succeeded;
                         }
@@ -102,7 +103,7 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     /// @param _token Address of token to sweep; use address(0) for native coin.
     /// @param _recipient Recipient of the swept balance.
     function sweep(address _token, address _recipient) external onlyOwner nonReentrant {
-        if (_recipient == address(0)) revert Errors.ZeroAddress();
+        require(_recipient != address(0), Errors.ZeroAddress());
 
         if (_token == address(0)) {
             uint256 bal = address(this).balance;

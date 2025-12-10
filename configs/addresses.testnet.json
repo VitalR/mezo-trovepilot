@@ -14,7 +14,7 @@
     "price": {
       "priceFeed": "0x86bCF0841622a5dAC14A313a15f96A95421b9366",
       "skipOracle": "0x7b7c000000000000000000000000000000000015",
-      "pyth": "0x2880aB155794e7179c9eE2e38200202908C17B43"
+      "pythOracle": "0x2880aB155794e7179c9eE2e38200202908C17B43"
     }
   },
   "trovePilot": {

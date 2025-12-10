@@ -30,7 +30,7 @@ contract TrovePilotDeployScript is Script {
     struct Price {
         address priceFeed;
         address skipOracle;
-        address pyth;
+        address pythOracle;
     }
 
     struct MezoCfg {
@@ -118,8 +118,8 @@ contract TrovePilotDeployScript is Script {
             '      "skipOracle": "',
             vm.toString(cfg.mezo.price.skipOracle),
             '",\n',
-            '      "pyth": "',
-            vm.toString(cfg.mezo.price.pyth),
+            '      "pythOracle": "',
+            vm.toString(cfg.mezo.price.pythOracle),
             '"\n',
             "    }\n",
             "  },\n",
@@ -149,7 +149,9 @@ contract TrovePilotDeployScript is Script {
         });
         cfg.mezo.tokens = Tokens({ musd: MezoAddresses.MUSD });
         cfg.mezo.price = Price({
-            priceFeed: MezoAddresses.PRICE_FEED, skipOracle: MezoAddresses.SKIP_ORACLE, pyth: MezoAddresses.PYTH_ORACLE
+            priceFeed: MezoAddresses.PRICE_FEED,
+            skipOracle: MezoAddresses.SKIP_ORACLE,
+            pythOracle: MezoAddresses.PYTH_ORACLE
         });
 
         // If file exists, parse and reuse existing fields.

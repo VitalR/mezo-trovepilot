@@ -20,6 +20,23 @@ contract RedemptionRouterTest is Test {
         router = new RedemptionRouter(address(tm), address(hints), address(sorted));
     }
 
+    function test_deploy_sets_router() public view {
+        assertEq(address(router.TROVE_MANAGER()), address(tm));
+        assertEq(address(router.HINT_HELPERS()), address(hints));
+        assertEq(address(router.SORTED_TROVES()), address(sorted));
+    }
+
+    function test_deploy_reverts_zero_router() public {
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        new RedemptionRouter(address(0), address(0), address(0));
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        new RedemptionRouter(address(0), address(0), address(sorted));
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        new RedemptionRouter(address(tm), address(0), address(sorted));
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        new RedemptionRouter(address(tm), address(hints), address(0));
+    }
+
     function test_redeem_quick_forwards_params() public {
         address caller = address(this);
         vm.expectEmit(true, true, false, true);
@@ -38,7 +55,7 @@ contract RedemptionRouterTest is Test {
     }
 
     function test_redeem_quick_reverts_on_zero_amount() public {
-        vm.expectRevert();
+        vm.expectRevert(Errors.ZeroAmount.selector);
         router.redeemQuick(0);
     }
 
@@ -69,7 +86,7 @@ contract RedemptionRouterTest is Test {
     }
 
     function test_redeem_hinted_reverts_on_zero_amount() public {
-        vm.expectRevert();
+        vm.expectRevert(Errors.ZeroAmount.selector);
         router.redeemHinted(0, 2000, 10, address(5), address(6));
     }
 }

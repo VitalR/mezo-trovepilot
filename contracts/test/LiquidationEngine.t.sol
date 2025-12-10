@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import { Test } from "forge-std/Test.sol";
 
 import { LiquidationEngine } from "../src/LiquidationEngine.sol";
+import { Errors } from "../src/utils/Errors.sol";
 import { MockTroveManager, MockERC20 } from "./utils/Mocks.t.sol";
 
 contract LiquidationEngineTest is Test {
@@ -17,6 +18,15 @@ contract LiquidationEngineTest is Test {
         tm = new MockTroveManager();
         engine = new LiquidationEngine(address(tm));
         token = new MockERC20();
+    }
+
+    function test_deploy_sets_trove_manager() public view {
+        assertEq(address(engine.TROVE_MANAGER()), address(tm));
+    }
+
+    function test_deploy_reverts_zero_trove_manager() public {
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        new LiquidationEngine(address(0));
     }
 
     function test_liquidation_batch_success() public {
@@ -148,5 +158,11 @@ contract LiquidationEngineTest is Test {
         // Owner calls sweep on empty balances; should not revert.
         engine.sweep(address(0), address(this));
         engine.sweep(address(token), address(this));
+    }
+
+    function tests_sweep_reverts_not_owner() public {
+        vm.prank(keeper);
+        vm.expectRevert();
+        engine.sweep(address(0), address(this));
     }
 }

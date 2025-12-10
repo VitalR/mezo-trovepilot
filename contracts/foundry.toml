@@ -4,8 +4,8 @@ out = "out"
 libs = ["lib"]
 fs_permissions = [
     { access = "read", path = "../broadcast" },
-    { access = "read", path = "../deployments" },
-    { access = "write", path = "../deployments" }
+    { access = "read", path = "../configs" },
+    { access = "write", path = "../configs" }
 ]
 
 solc = "0.8.30"

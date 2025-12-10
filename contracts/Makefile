@@ -5,7 +5,6 @@
 #   make test MATCH=Redeem_UsingRealUserBalance
 #   make test-fork MATCH=TrovePilotLocalIntegrationTest  # runs with MEZO fork
 #   make deploy-testnet  # deploy + verify on testnet
-#   make demo-testnet    # run e2e demo script on testnet
 #   make verify-address ADDR=0x... CONTRACT=src/File.sol:Name
 # ==============================================
 
@@ -43,7 +42,6 @@ help:
 	@echo "make test [MATCH=...]       # run tests"
 	@echo "make test-fork [MATCH=...]  # run tests on Mezo fork (needs MEZO_RPC)"
 	@echo "make deploy-testnet         # deploy + verify on Mezo testnet"
-	@echo "make demo-testnet           # run end-to-end demo script on Mezo testnet"
 	@echo "make verify-address ADDR=0x.. CONTRACT=src/File.sol:Name"
 	@echo "make verify-router          # convenience verify for RedemptionRouter (ADDR=...)"
 	@echo "make verify-engine          # convenience verify for LiquidationEngine (ADDR=...)"
@@ -87,16 +85,6 @@ deploy-testnet:
 	  --verifier-url "$(BLOCKSCOUT_API)" \
 	  -vvvv'
 
-# Run demo script on testnet (reads addresses from env or deploys minimal fresh ones)
-.PHONY: demo-testnet
-demo-testnet:
-	@bash -lc '$(env) forge script script/TrovePilotDemo.s.sol:TrovePilotDemoScript \
-	  --rpc-url "$$MEZO_RPC" \
-	  --private-key "$$DEPLOYER_PRIVATE_KEY" \
-	  --broadcast \
-	  --slow \
-	  -vvvv'
-
 # Post-deploy verification helpers
 # Usage:
 #  make verify-address ADDR=0x... CONTRACT=src/RedemptionRouter.sol:RedemptionRouter
@@ -110,7 +98,7 @@ verify-address:
 	forge verify-contract \
 	  --rpc-url "$(RPC_URL)" \
 	  --verifier blockscout \
-	  --verifier-url '$(BLOCKSCOUT_API)' \
+	  --verifier-url "$(BLOCKSCOUT_API)" \
 	  $(ADDR) \
 	  $(CONTRACT)
 
@@ -132,9 +120,6 @@ abi:
 	mkdir -p $(ABI_OUT)
 	forge inspect RedemptionRouter abi > $(ABI_OUT)/RedemptionRouter.json
 	forge inspect LiquidationEngine abi > $(ABI_OUT)/LiquidationEngine.json
-	forge inspect VaultManager abi > $(ABI_OUT)/VaultManager.json
-	forge inspect YieldAggregator abi > $(ABI_OUT)/YieldAggregator.json
-	forge inspect KeeperRegistry abi > $(ABI_OUT)/KeeperRegistry.json
 	@echo "ABIs written to $(ABI_OUT)/"
 
 # --- Utilities ---

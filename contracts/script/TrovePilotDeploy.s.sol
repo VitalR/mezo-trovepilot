@@ -1,105 +1,164 @@
-// // SPDX-License-Identifier: MIT
-// pragma solidity 0.8.30;
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.30;
 
-// import "forge-std/Script.sol";
-// import { MezoAddresses } from "./MezoAddresses.sol";
-// import { RedemptionRouter } from "../src/RedemptionRouter.sol";
-// import { LiquidationEngine } from "../src/LiquidationEngine.sol";
+import "forge-std/Script.sol";
+import "forge-std/StdJson.sol";
 
-// contract TrovePilotDeployScript is Script {
-//     // Cached env/config to reduce local vars in run()
-//     address public ownerCached;
-//     address public feeSinkCached;
-//     uint16 public feeBpsCached;
-//     bool public deployRegistryCached;
+import { MezoAddresses } from "./MezoAddresses.sol";
+import { RedemptionRouter } from "../src/RedemptionRouter.sol";
+import { LiquidationEngine } from "../src/LiquidationEngine.sol";
 
-//     // Deployed addresses (for logging and manifest)
-//     address public deployedRouter;
-//     address public deployedEngine;
+/// @notice Deploys the minimal v2 wrappers (LiquidationEngine, RedemptionRouter) on Mezo testnet.
+/// @dev Owner for LiquidationEngine is the deployer (msg.sender).
+contract TrovePilotDeployScript is Script {
+    using stdJson for string;
 
-//     function run() external {
-//         // ========== ENV ==========
-//         // DEPLOYER_PRIVATE_KEY=0x...
-//         // OWNER=0x... (optional, defaults to deployer)
-//         // FEE_SINK=0x... (optional)
-//         // FEE_BPS=0..1000
-//         // DEPLOY_REGISTRY=true/false
+    address public deployedRouter;
+    address public deployedEngine;
 
-//         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
-//         ownerCached = vm.envOr("OWNER", vm.addr(pk));
-//         feeSinkCached = vm.envOr("FEE_SINK", address(0));
-//         {
-//             uint256 feeBpsU = vm.envOr("FEE_BPS", uint256(0));
-//             require(feeBpsU <= 1000, "feeBps > 10%");
-//             feeBpsCached = uint16(feeBpsU);
-//         }
-//         deployRegistryCached = vm.envOr("DEPLOY_REGISTRY", false);
+    struct Core {
+        address troveManager;
+        address hintHelpers;
+        address sortedTroves;
+        address borrowerOperations;
+    }
 
-//         vm.startBroadcast(pk);
+    struct Tokens {
+        address musd;
+    }
 
-//         // 1) RedemptionRouter (stateless)
-//         deployedRouter = address(
-//             new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS,
-// MezoAddresses.SORTED_TROVES) );
+    struct Price {
+        address priceFeed;
+        address skipOracle;
+        address pyth;
+    }
 
-//         // 2) LiquidationEngine
-//         deployedEngine =
-//             address(new LiquidationEngine(MezoAddresses.TROVE_MANAGER, ownerCached, feeSinkCached, feeBpsCached));
-//         LiquidationEngine(payable(deployedEngine)).setMusd(MezoAddresses.MUSD);
+    struct MezoCfg {
+        Core core;
+        Tokens tokens;
+        Price price;
+    }
 
-//         // 3) VaultManager (MVP) + YieldAggregator (stub)
-//         deployedVault = address(new VaultManager(MezoAddresses.MUSD, deployedRouter, ownerCached));
-//         deployedAggregator = address(new YieldAggregator(MezoAddresses.MUSD, ownerCached));
-//         YieldAggregator(deployedAggregator).setNotifier(deployedVault, true);
-//         VaultManager(deployedVault).setAggregator(deployedAggregator);
+    struct TrovePilotCfg {
+        address liquidationEngine;
+        address redemptionRouter;
+    }
 
-//         // 4) (Optional) KeeperRegistry
-//         if (deployRegistryCached) {
-//             deployedRegistry = address(new KeeperRegistry(ownerCached));
-//             LiquidationEngine(payable(deployedEngine)).setKeeperRegistry(deployedRegistry);
-//             KeeperRegistry(deployedRegistry).setAuthorizer(deployedEngine, true);
-//             string memory csv = vm.envOr("AUTHORIZERS", string(""));
-//             if (bytes(csv).length > 0) {
-//                 string[] memory parts = vm.split(csv, ",");
-//                 for (uint256 i = 0; i < parts.length; i++) {
-//                     address a = vm.parseAddress(parts[i]);
-//                     KeeperRegistry(deployedRegistry).setAuthorizer(a, true);
-//                 }
-//             }
-//         }
+    struct AddressesCfg {
+        uint256 chainId;
+        string network;
+        MezoCfg mezo;
+        TrovePilotCfg trovePilot;
+    }
 
-//         vm.stopBroadcast();
+    function run() external {
+        uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
-//         // 5) JSON manifest for downstream tooling (deployments/<chainId>/mezo-<chainId>.json)
-//         _writeManifest();
+        vm.startBroadcast(pk);
 
-//         // 6) Log summary
-//         console2.log("=== TrovePilot deployed on Mezo Testnet (31611) ===");
-//         console2.log("Owner:", ownerCached);
-//         console2.log("RedemptionRouter:", deployedRouter);
-//         console2.log("LiquidationEngine:", deployedEngine);
-//         console2.log("VaultManager:", deployedVault);
-//         if (deployRegistryCached) console2.log("KeeperRegistry:", deployedRegistry);
-//         console2.log("MUSD:", MezoAddresses.MUSD);
-//     }
+        // Deploy RedemptionRouter (stateless)
+        deployedRouter = address(
+            new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS, MezoAddresses.SORTED_TROVES)
+        );
 
-//     function _writeManifest() internal {
-//         string memory root = "mezo";
-//         vm.serializeAddress(root, "RedemptionRouter", deployedRouter);
-//         vm.serializeAddress(root, "LiquidationEngine", deployedEngine);
-//         vm.serializeAddress(root, "VaultManager", deployedVault);
-//         vm.serializeAddress(root, "YieldAggregator", deployedAggregator);
-//         if (deployRegistryCached) vm.serializeAddress(root, "KeeperRegistry", deployedRegistry);
-//         string memory out = vm.serializeAddress(root, "MUSD", MezoAddresses.MUSD);
+        // Deploy LiquidationEngine (stateless except jobId; owner = deployer)
+        deployedEngine = address(new LiquidationEngine(MezoAddresses.TROVE_MANAGER));
 
-//         string memory proj = vm.projectRoot();
-//         string memory dir = string.concat(proj, "/deployments/", vm.toString(MezoAddresses.CHAIN_ID));
-//         vm.createDir(dir, true);
-//         string memory rolling = string.concat(dir, "/mezo-", vm.toString(MezoAddresses.CHAIN_ID), ".json");
-//         string memory versioned = string.concat(
-//             dir, "/mezo-", vm.toString(MezoAddresses.CHAIN_ID), "-", vm.toString(block.number), ".json"
-//         );
-//         vm.writeJson(out, rolling);
-//         vm.writeJson(out, versioned);
-//     }
-// }
+        vm.stopBroadcast();
+
+        _writeManifest();
+
+        console2.log("=== TrovePilot deployed (Mezo testnet) ===");
+        console2.log("RedemptionRouter:", deployedRouter);
+        console2.log("LiquidationEngine:", deployedEngine);
+        console2.log("Owner (LiquidationEngine):", vm.addr(pk));
+    }
+
+    /// @dev Writes updated trovePilot section to configs/addresses.testnet.json, preserving other fields.
+    function _writeManifest() internal {
+        // projectRoot() returns the contracts/ dir; configs/ lives one level up.
+        string memory path = string.concat(vm.projectRoot(), "/../configs/addresses.testnet.json");
+
+        AddressesCfg memory cfg = _loadConfig(path);
+        cfg.trovePilot.liquidationEngine = deployedEngine;
+        cfg.trovePilot.redemptionRouter = deployedRouter;
+
+        string memory json = string.concat(
+            "{\n",
+            '  "chainId": ',
+            vm.toString(cfg.chainId),
+            ",\n",
+            '  "network": "',
+            cfg.network,
+            '",\n',
+            '  "mezo": {\n',
+            '    "core": {\n',
+            '      "troveManager": "',
+            vm.toString(cfg.mezo.core.troveManager),
+            '",\n',
+            '      "hintHelpers": "',
+            vm.toString(cfg.mezo.core.hintHelpers),
+            '",\n',
+            '      "sortedTroves": "',
+            vm.toString(cfg.mezo.core.sortedTroves),
+            '",\n',
+            '      "borrowerOperations": "',
+            vm.toString(cfg.mezo.core.borrowerOperations),
+            '"\n',
+            "    },\n",
+            '    "tokens": {\n',
+            '      "musd": "',
+            vm.toString(cfg.mezo.tokens.musd),
+            '"\n',
+            "    },\n",
+            '    "price": {\n',
+            '      "priceFeed": "',
+            vm.toString(cfg.mezo.price.priceFeed),
+            '",\n',
+            '      "skipOracle": "',
+            vm.toString(cfg.mezo.price.skipOracle),
+            '",\n',
+            '      "pyth": "',
+            vm.toString(cfg.mezo.price.pyth),
+            '"\n',
+            "    }\n",
+            "  },\n",
+            '  "trovePilot": {\n',
+            '    "liquidationEngine": "',
+            vm.toString(cfg.trovePilot.liquidationEngine),
+            '",\n',
+            '    "redemptionRouter": "',
+            vm.toString(cfg.trovePilot.redemptionRouter),
+            '"\n',
+            "  }\n",
+            "}\n"
+        );
+
+        vm.writeFile(path, json);
+    }
+
+    function _loadConfig(string memory path) internal view returns (AddressesCfg memory cfg) {
+        // Defaults based on MezoAddresses for first-time creation.
+        cfg.chainId = MezoAddresses.CHAIN_ID;
+        cfg.network = "mezo-testnet";
+        cfg.mezo.core = Core({
+            troveManager: MezoAddresses.TROVE_MANAGER,
+            hintHelpers: MezoAddresses.HINT_HELPERS,
+            sortedTroves: MezoAddresses.SORTED_TROVES,
+            borrowerOperations: MezoAddresses.BORROWER_OPERATIONS
+        });
+        cfg.mezo.tokens = Tokens({ musd: MezoAddresses.MUSD });
+        cfg.mezo.price = Price({
+            priceFeed: MezoAddresses.PRICE_FEED, skipOracle: MezoAddresses.SKIP_ORACLE, pyth: MezoAddresses.PYTH_ORACLE
+        });
+
+        // If file exists, parse and reuse existing fields.
+        try vm.readFile(path) returns (string memory raw) {
+            if (bytes(raw).length > 0) {
+                try vm.parseJson(raw) returns (bytes memory parsed) {
+                    cfg = abi.decode(parsed, (AddressesCfg));
+                } catch { }
+            }
+        } catch { }
+    }
+}

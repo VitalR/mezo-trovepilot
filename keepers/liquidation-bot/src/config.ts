@@ -22,6 +22,10 @@ export interface BotConfig {
   sortedTroves: Address;
   liquidationEngine: Address;
   priceFeed: Address;
+  maxTxRetries: number;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  maxNativeSpentPerRun?: bigint;
   maxTrovesToScan: number;
   maxTrovesPerJob: number;
   earlyExitScanThreshold: number;
@@ -49,6 +53,16 @@ export function loadConfig(): BotConfig {
     priceFeed: (process.env.PRICE_FEED_ADDRESS ??
       defaults.priceFeed ??
       requireEnv('PRICE_FEED_ADDRESS')) as Address,
+    maxTxRetries: Number(process.env.MAX_TX_RETRIES ?? '2'),
+    maxFeePerGas: process.env.MAX_FEE_PER_GAS
+      ? BigInt(process.env.MAX_FEE_PER_GAS)
+      : undefined,
+    maxPriorityFeePerGas: process.env.MAX_PRIORITY_FEE_PER_GAS
+      ? BigInt(process.env.MAX_PRIORITY_FEE_PER_GAS)
+      : undefined,
+    maxNativeSpentPerRun: process.env.MAX_NATIVE_SPENT_PER_RUN
+      ? BigInt(process.env.MAX_NATIVE_SPENT_PER_RUN)
+      : undefined,
     maxTrovesToScan: Number(process.env.MAX_TROVES_TO_SCAN_PER_RUN ?? '500'),
     maxTrovesPerJob: Number(process.env.MAX_TROVES_PER_JOB ?? '20'),
     earlyExitScanThreshold: Number(
@@ -144,5 +158,17 @@ function validateConfig(cfg: BotConfig) {
     log.warn(
       `MAX_PRICE_AGE_SECONDS is very low (${cfg.maxPriceAgeSeconds}); may reject fresh prices`
     );
+  }
+
+  if (cfg.maxTxRetries < 0) throw new Error('MAX_TX_RETRIES must be >= 0');
+  const gasBounds = [
+    cfg.maxFeePerGas,
+    cfg.maxPriorityFeePerGas,
+    cfg.maxNativeSpentPerRun,
+  ];
+  for (const bound of gasBounds) {
+    if (bound !== undefined && bound < 0n) {
+      throw new Error('Gas/fee bounds must be non-negative');
+    }
   }
 }

@@ -27,6 +27,8 @@ async function main() {
 
   log.info(`Using price (1e18)=${price.toString()}`);
 
+  const spendTracker = { spent: 0n };
+
   const discovery = await getLiquidatableTroves({
     client: publicClient,
     troveManager: config.troveManager,
@@ -67,6 +69,13 @@ async function main() {
       liquidationEngine: config.liquidationEngine,
       job,
       dryRun: config.dryRun,
+      config: {
+        maxTxRetries: config.maxTxRetries,
+        maxFeePerGas: config.maxFeePerGas,
+        maxPriorityFeePerGas: config.maxPriorityFeePerGas,
+        maxNativeSpentPerRun: config.maxNativeSpentPerRun,
+      },
+      spendTracker,
     });
   }
 

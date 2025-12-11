@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { Address, isAddress } from 'viem';
+import { log } from './core/logging.js';
 
 dotenv.config();
 
@@ -9,7 +12,8 @@ function requireEnv(name: string): string {
   return v;
 }
 
-export const MCR = 1_100_000_000_000_000_000n; // 110% in 1e18
+// Mezo MCR (ICR threshold) in 1e18 units. Keep in sync with protocol.
+export const MCR_ICR = 1_100_000_000_000_000_000n; // 110% in 1e18
 
 export interface BotConfig {
   rpcUrl: string;
@@ -28,13 +32,23 @@ export interface BotConfig {
 }
 
 export function loadConfig(): BotConfig {
+  const defaults = loadAddressDefaults();
+
   const config: BotConfig = {
     rpcUrl: requireEnv('MEZO_RPC_URL'),
     privateKey: requireEnv('KEEPER_PRIVATE_KEY') as `0x${string}`,
-    troveManager: requireEnv('TROVE_MANAGER_ADDRESS') as Address,
-    sortedTroves: requireEnv('SORTED_TROVES_ADDRESS') as Address,
-    liquidationEngine: requireEnv('LIQUIDATION_ENGINE_ADDRESS') as Address,
-    priceFeed: requireEnv('PRICE_FEED_ADDRESS') as Address,
+    troveManager: (process.env.TROVE_MANAGER_ADDRESS ??
+      defaults.troveManager ??
+      requireEnv('TROVE_MANAGER_ADDRESS')) as Address,
+    sortedTroves: (process.env.SORTED_TROVES_ADDRESS ??
+      defaults.sortedTroves ??
+      requireEnv('SORTED_TROVES_ADDRESS')) as Address,
+    liquidationEngine: (process.env.LIQUIDATION_ENGINE_ADDRESS ??
+      defaults.liquidationEngine ??
+      requireEnv('LIQUIDATION_ENGINE_ADDRESS')) as Address,
+    priceFeed: (process.env.PRICE_FEED_ADDRESS ??
+      defaults.priceFeed ??
+      requireEnv('PRICE_FEED_ADDRESS')) as Address,
     maxTrovesToScan: Number(process.env.MAX_TROVES_TO_SCAN_PER_RUN ?? '500'),
     maxTrovesPerJob: Number(process.env.MAX_TROVES_PER_JOB ?? '20'),
     earlyExitScanThreshold: Number(
@@ -48,6 +62,44 @@ export function loadConfig(): BotConfig {
 
   validateConfig(config);
   return config;
+}
+
+type AddressDefaults = Partial<{
+  troveManager: Address;
+  sortedTroves: Address;
+  liquidationEngine: Address;
+  priceFeed: Address;
+}>;
+
+function loadAddressDefaults(): AddressDefaults {
+  const configPath = process.env.CONFIG_PATH;
+  const network = process.env.NETWORK ?? 'mezo-testnet';
+  if (!configPath) return {};
+
+  try {
+    const resolved = path.resolve(process.cwd(), configPath);
+    const raw = fs.readFileSync(resolved, 'utf8');
+    const json = JSON.parse(raw);
+    if (!json || json.network !== network) {
+      log.warn(
+        `CONFIG_PATH loaded but network mismatch or missing (expected ${network})`
+      );
+      return {};
+    }
+    const mezo = json.mezo ?? {};
+    const trovePilot = json.trovePilot ?? {};
+    const core = mezo.core ?? {};
+    const price = mezo.price ?? {};
+    return {
+      troveManager: core.troveManager,
+      sortedTroves: core.sortedTroves,
+      priceFeed: price.priceFeed,
+      liquidationEngine: trovePilot.liquidationEngine,
+    };
+  } catch (err) {
+    log.warn(`Failed to load CONFIG_PATH ${configPath}: ${String(err)}`);
+    return {};
+  }
 }
 
 function validateConfig(cfg: BotConfig) {
@@ -79,4 +131,18 @@ function validateConfig(cfg: BotConfig) {
     throw new Error('EARLY_EXIT_SCAN_THRESHOLD must be >= 0');
   if (cfg.maxPriceAgeSeconds < 0)
     throw new Error('MAX_PRICE_AGE_SECONDS must be >= 0');
+
+  if (
+    cfg.minBtcPrice > 0n &&
+    cfg.maxBtcPrice > 0n &&
+    cfg.minBtcPrice > cfg.maxBtcPrice
+  ) {
+    throw new Error('MIN_BTC_PRICE cannot be greater than MAX_BTC_PRICE');
+  }
+
+  if (cfg.maxPriceAgeSeconds > 0 && cfg.maxPriceAgeSeconds < 5) {
+    log.warn(
+      `MAX_PRICE_AGE_SECONDS is very low (${cfg.maxPriceAgeSeconds}); may reject fresh prices`
+    );
+  }
 }

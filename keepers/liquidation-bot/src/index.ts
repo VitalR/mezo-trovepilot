@@ -43,10 +43,21 @@ async function main() {
   });
 
   log.info(
-    `Discovery scanned=${discovery.totalScanned} belowMCR=${discovery.totalBelowMcr} liquidatable=${discovery.liquidatableBorrowers.length}`
-  );
-  log.info(
-    `Built ${jobs.length} jobs from ${discovery.liquidatableBorrowers.length} liquidatable troves`
+    JSON.stringify({
+      discovery: {
+        scanned: discovery.stats.scanned,
+        liquidatable: discovery.stats.liquidatable,
+        belowMcr: discovery.stats.belowMcr,
+        earlyExit: discovery.stats.earlyExit,
+        maxScan: config.maxTrovesToScan,
+        threshold: config.earlyExitScanThreshold,
+      },
+      jobs: {
+        total: jobs.length,
+        liquidatable: discovery.liquidatableBorrowers.length,
+        maxPerJob: config.maxTrovesPerJob,
+      },
+    })
   );
 
   for (const job of jobs) {

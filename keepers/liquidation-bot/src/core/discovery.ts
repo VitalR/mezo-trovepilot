@@ -2,8 +2,15 @@ import { Address } from 'viem';
 import { PublicClient } from '../clients/mezoClient.js';
 import { sortedTrovesAbi } from '../abis/sortedTrovesAbi.js';
 import { troveManagerAbi } from '../abis/troveManagerAbi.js';
-import { MCR } from '../config.js';
+import { MCR_ICR } from '../config.js';
 import { log } from './logging.js';
+
+export interface DiscoveryStats {
+  scanned: number;
+  liquidatable: number;
+  belowMcr: number;
+  earlyExit: boolean;
+}
 
 export async function getLiquidatableTroves(params: {
   client: PublicClient;
@@ -16,6 +23,7 @@ export async function getLiquidatableTroves(params: {
   liquidatableBorrowers: Address[];
   totalScanned: bigint;
   totalBelowMcr: bigint;
+  stats: DiscoveryStats;
 }> {
   const {
     client,
@@ -34,7 +42,12 @@ export async function getLiquidatableTroves(params: {
   })) as bigint;
 
   if (size === 0n) {
-    return { liquidatableBorrowers: [], totalScanned: 0n, totalBelowMcr: 0n };
+    return {
+      liquidatableBorrowers: [],
+      totalScanned: 0n,
+      totalBelowMcr: 0n,
+      stats: { scanned: 0, liquidatable: 0, belowMcr: 0, earlyExit: false },
+    };
   }
 
   let current = (await client.readContract({
@@ -46,6 +59,8 @@ export async function getLiquidatableTroves(params: {
   const liquidatable: Address[] = [];
   let checked = 0n;
   let belowMcr = 0n;
+
+  let earlyExit = false;
 
   while (
     current !== '0x0000000000000000000000000000000000000000' &&
@@ -59,7 +74,7 @@ export async function getLiquidatableTroves(params: {
       args: [current, price],
     })) as bigint;
 
-    if (icr < MCR) {
+    if (icr < MCR_ICR) {
       liquidatable.push(current);
       belowMcr += 1n;
     }
@@ -78,7 +93,10 @@ export async function getLiquidatableTroves(params: {
       checked >= BigInt(earlyExitThreshold) &&
       liquidatable.length === 0
     ) {
-      log.info(`Early-exit: scanned ${checked} troves, none below MCR`);
+      earlyExit = true;
+      log.info(
+        `Early-exit threshold hit scanned=${checked} liquidatable=${liquidatable.length} maxScan=${maxScanBig} threshold=${earlyExitThreshold}`
+      );
       break;
     }
   }
@@ -90,5 +108,11 @@ export async function getLiquidatableTroves(params: {
     liquidatableBorrowers: liquidatable,
     totalScanned: checked,
     totalBelowMcr: belowMcr,
+    stats: {
+      scanned: Number(checked),
+      liquidatable: liquidatable.length,
+      belowMcr: Number(belowMcr),
+      earlyExit,
+    },
   };
 }

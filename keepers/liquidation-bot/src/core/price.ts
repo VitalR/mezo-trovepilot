@@ -3,6 +3,9 @@ import { PublicClient } from '../clients/mezoClient.js';
 import { priceFeedAbi } from '../abis/priceFeedAbi.js';
 import { log } from './logging.js';
 
+// Prices are expected in 1e18 units (e.g., 60,000 USD => 60000e18).
+// MIN_BTC_PRICE / MAX_BTC_PRICE must use the same 1e18 scale.
+
 type LatestRound = {
   roundId: bigint;
   answer: bigint;
@@ -71,13 +74,31 @@ export async function getCurrentPrice(params: {
 
   if (minPrice > 0n && price < minPrice) {
     log.warn(
-      `Price ${price.toString()} below MIN_BTC_PRICE ${minPrice.toString()}; skipping run`
+      JSON.stringify({
+        reason: 'OUT_OF_BOUNDS',
+        price: price.toString(),
+        min: minPrice.toString(),
+        max: maxPrice > 0n ? maxPrice.toString() : undefined,
+        maxAgeSeconds: maxAgeSeconds || undefined,
+        ageSeconds: updatedAt
+          ? Number(BigInt(Math.floor(Date.now() / 1000)) - updatedAt)
+          : undefined,
+      })
     );
     return null;
   }
   if (maxPrice > 0n && price > maxPrice) {
     log.warn(
-      `Price ${price.toString()} above MAX_BTC_PRICE ${maxPrice.toString()}; skipping run`
+      JSON.stringify({
+        reason: 'OUT_OF_BOUNDS',
+        price: price.toString(),
+        min: minPrice > 0n ? minPrice.toString() : undefined,
+        max: maxPrice.toString(),
+        maxAgeSeconds: maxAgeSeconds || undefined,
+        ageSeconds: updatedAt
+          ? Number(BigInt(Math.floor(Date.now() / 1000)) - updatedAt)
+          : undefined,
+      })
     );
     return null;
   }
@@ -87,7 +108,14 @@ export async function getCurrentPrice(params: {
     const age = now - updatedAt;
     if (age > BigInt(maxAgeSeconds)) {
       log.warn(
-        `Price age ${age}s exceeds MAX_PRICE_AGE_SECONDS=${maxAgeSeconds}; skipping run`
+        JSON.stringify({
+          reason: 'STALE',
+          price: price.toString(),
+          ageSeconds: Number(age),
+          maxAgeSeconds,
+          min: minPrice > 0n ? minPrice.toString() : undefined,
+          max: maxPrice > 0n ? maxPrice.toString() : undefined,
+        })
       );
       return null;
     }

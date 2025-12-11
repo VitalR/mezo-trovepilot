@@ -10,10 +10,22 @@ export async function getLiquidatableTroves(params: {
   troveManager: Address;
   sortedTroves: Address;
   price: bigint;
-  maxTroves?: bigint;
-}): Promise<Address[]> {
-  const { client, troveManager, sortedTroves, price } = params;
-  const maxTroves = params.maxTroves ?? 500n;
+  maxToScan: number;
+  earlyExitThreshold: number;
+}): Promise<{
+  liquidatableBorrowers: Address[];
+  totalScanned: bigint;
+  totalBelowMcr: bigint;
+}> {
+  const {
+    client,
+    troveManager,
+    sortedTroves,
+    price,
+    maxToScan,
+    earlyExitThreshold,
+  } = params;
+  const maxScanBig = BigInt(maxToScan);
 
   const size = (await client.readContract({
     address: sortedTroves,
@@ -21,7 +33,9 @@ export async function getLiquidatableTroves(params: {
     functionName: 'getSize',
   })) as bigint;
 
-  if (size === 0n) return [];
+  if (size === 0n) {
+    return { liquidatableBorrowers: [], totalScanned: 0n, totalBelowMcr: 0n };
+  }
 
   let current = (await client.readContract({
     address: sortedTroves,
@@ -31,11 +45,12 @@ export async function getLiquidatableTroves(params: {
 
   const liquidatable: Address[] = [];
   let checked = 0n;
+  let belowMcr = 0n;
 
   while (
     current !== '0x0000000000000000000000000000000000000000' &&
     checked < size &&
-    checked < maxTroves
+    checked < maxScanBig
   ) {
     const icr = (await client.readContract({
       address: troveManager,
@@ -46,6 +61,7 @@ export async function getLiquidatableTroves(params: {
 
     if (icr < MCR) {
       liquidatable.push(current);
+      belowMcr += 1n;
     }
 
     current = (await client.readContract({
@@ -56,8 +72,23 @@ export async function getLiquidatableTroves(params: {
     })) as Address;
 
     checked += 1n;
+
+    if (
+      earlyExitThreshold > 0 &&
+      checked >= BigInt(earlyExitThreshold) &&
+      liquidatable.length === 0
+    ) {
+      log.info(`Early-exit: scanned ${checked} troves, none below MCR`);
+      break;
+    }
   }
 
-  log.info(`Discovery checked=${checked} liquidatable=${liquidatable.length}`);
-  return liquidatable;
+  log.info(
+    `Discovery checked=${checked} liquidatable=${liquidatable.length} belowMCR=${belowMcr}`
+  );
+  return {
+    liquidatableBorrowers: liquidatable,
+    totalScanned: checked,
+    totalBelowMcr: belowMcr,
+  };
 }

@@ -18,6 +18,8 @@ export const MCR_ICR = 1_100_000_000_000_000_000n; // 110% in 1e18
 export interface BotConfig {
   rpcUrl: string;
   privateKey: `0x${string}`;
+  externalSignerUrl?: string;
+  keeperAddress?: Address;
   troveManager: Address;
   sortedTroves: Address;
   liquidationEngine: Address;
@@ -40,7 +42,9 @@ export function loadConfig(): BotConfig {
 
   const config: BotConfig = {
     rpcUrl: requireEnv('MEZO_RPC_URL'),
-    privateKey: requireEnv('KEEPER_PRIVATE_KEY') as `0x${string}`,
+    privateKey: (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`,
+    externalSignerUrl: process.env.EXTERNAL_SIGNER_URL,
+    keeperAddress: process.env.KEEPER_ADDRESS as Address | undefined,
     troveManager: (process.env.TROVE_MANAGER_ADDRESS ??
       defaults.troveManager ??
       requireEnv('TROVE_MANAGER_ADDRESS')) as Address,
@@ -170,5 +174,20 @@ function validateConfig(cfg: BotConfig) {
     if (bound !== undefined && bound < 0n) {
       throw new Error('Gas/fee bounds must be non-negative');
     }
+  }
+
+  // Signer validation
+  const hasExt = Boolean(cfg.externalSignerUrl);
+  const hasPk = cfg.privateKey && cfg.privateKey.length > 2;
+  if (!hasExt && !hasPk) {
+    throw new Error(
+      'Provide either KEEPER_PRIVATE_KEY or EXTERNAL_SIGNER_URL + KEEPER_ADDRESS'
+    );
+  }
+  if (hasExt) {
+    if (!cfg.keeperAddress)
+      throw new Error(
+        'KEEPER_ADDRESS is required when using EXTERNAL_SIGNER_URL'
+      );
   }
 }

@@ -3,17 +3,29 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { BotConfig } from '../config.js';
 
 export function buildClients(config: BotConfig) {
-  const account = privateKeyToAccount(config.privateKey);
-  const transport = http(config.rpcUrl);
+  const publicTransport = http(config.rpcUrl);
 
-  const publicClient = createPublicClient({
-    transport,
-  });
+  const publicClient = createPublicClient({ transport: publicTransport });
 
-  const walletClient = createWalletClient({
-    transport,
-    account,
-  });
+  let account: Address;
+  let walletTransport = publicTransport;
+  let walletClient;
+
+  if (config.externalSignerUrl && config.keeperAddress) {
+    account = config.keeperAddress;
+    walletTransport = http(config.externalSignerUrl);
+    walletClient = createWalletClient({
+      transport: walletTransport,
+      account,
+    });
+  } else {
+    const acct = privateKeyToAccount(config.privateKey);
+    account = acct.address as Address;
+    walletClient = createWalletClient({
+      transport: walletTransport,
+      account: acct,
+    });
+  }
 
   return { publicClient, walletClient, account };
 }

@@ -28,6 +28,7 @@ export interface BotConfig {
   maxFeePerGas?: bigint;
   maxPriorityFeePerGas?: bigint;
   maxNativeSpentPerRun?: bigint;
+  maxGasPerJob?: bigint;
   maxTrovesToScan: number;
   maxTrovesPerJob: number;
   earlyExitScanThreshold: number;
@@ -66,6 +67,9 @@ export function loadConfig(): BotConfig {
       : undefined,
     maxNativeSpentPerRun: process.env.MAX_NATIVE_SPENT_PER_RUN
       ? BigInt(process.env.MAX_NATIVE_SPENT_PER_RUN)
+      : undefined,
+    maxGasPerJob: process.env.MAX_GAS_PER_JOB
+      ? BigInt(process.env.MAX_GAS_PER_JOB)
       : undefined,
     maxTrovesToScan: Number(process.env.MAX_TROVES_TO_SCAN_PER_RUN ?? '500'),
     maxTrovesPerJob: Number(process.env.MAX_TROVES_PER_JOB ?? '20'),
@@ -169,6 +173,7 @@ function validateConfig(cfg: BotConfig) {
     cfg.maxFeePerGas,
     cfg.maxPriorityFeePerGas,
     cfg.maxNativeSpentPerRun,
+    cfg.maxGasPerJob,
   ];
   for (const bound of gasBounds) {
     if (bound !== undefined && bound < 0n) {

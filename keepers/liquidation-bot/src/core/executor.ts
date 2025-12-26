@@ -17,6 +17,7 @@ export async function executeLiquidationJob(params: {
     | 'maxFeePerGas'
     | 'maxPriorityFeePerGas'
     | 'maxNativeSpentPerRun'
+    | 'maxGasPerJob'
   >;
   spendTracker?: { spent: bigint };
 }): Promise<void> {
@@ -35,13 +36,37 @@ export async function executeLiquidationJob(params: {
     `Submitting liquidation: count=${job.borrowers.length} fallback=${job.fallbackOnFail}`
   );
 
-  const gasEstimate = await publicClient.estimateContractGas({
-    address: liquidationEngine,
-    abi: liquidationEngineAbi,
-    functionName: 'liquidateRange',
-    args: [job.borrowers, job.fallbackOnFail],
-    account: walletClient.account,
-  });
+  let borrowers = [...job.borrowers];
+
+  async function estimate(bList: Address[]) {
+    return publicClient.estimateContractGas({
+      address: liquidationEngine,
+      abi: liquidationEngineAbi,
+      functionName: 'liquidateRange',
+      args: [bList, job.fallbackOnFail],
+      account: walletClient.account,
+    });
+  }
+
+  let gasEstimate = await estimate(borrowers);
+
+  if (config.maxGasPerJob !== undefined && config.maxGasPerJob > 0n) {
+    while (borrowers.length > 1 && gasEstimate > config.maxGasPerJob) {
+      const half = Math.max(1, Math.ceil(borrowers.length / 2));
+      borrowers = borrowers.slice(0, half);
+      gasEstimate = await estimate(borrowers);
+    }
+    if (gasEstimate > config.maxGasPerJob) {
+      log.warn(
+        `Skipping job: estimated gas ${gasEstimate.toString()} exceeds MAX_GAS_PER_JOB ${config.maxGasPerJob.toString()} (borrowers=${
+          borrowers.length
+        })`
+      );
+      return;
+    }
+  }
+
+  const gasEstimateBorrowers = borrowers;
 
   const maxFeePerGas =
     config.maxFeePerGas ?? (await publicClient.getGasPrice());
@@ -71,7 +96,7 @@ export async function executeLiquidationJob(params: {
         address: liquidationEngine,
         abi: liquidationEngineAbi,
         functionName: 'liquidateRange',
-        args: [job.borrowers, job.fallbackOnFail],
+        args: [gasEstimateBorrowers, job.fallbackOnFail],
         maxFeePerGas,
         maxPriorityFeePerGas,
         gas: gasEstimate,
@@ -80,7 +105,7 @@ export async function executeLiquidationJob(params: {
       log.info(
         `Tx sent: ${hash} (gas=${gasEstimate.toString()} maxFeePerGas=${maxFeePerGas.toString()} fallback=${
           job.fallbackOnFail
-        })`
+        } borrowers=${gasEstimateBorrowers.length})`
       );
 
       const receipt = await publicClient.waitForTransactionReceipt({ hash });

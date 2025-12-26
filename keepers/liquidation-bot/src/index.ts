@@ -74,6 +74,7 @@ async function main() {
         maxFeePerGas: config.maxFeePerGas,
         maxPriorityFeePerGas: config.maxPriorityFeePerGas,
         maxNativeSpentPerRun: config.maxNativeSpentPerRun,
+        maxGasPerJob: config.maxGasPerJob,
       },
       spendTracker,
     });

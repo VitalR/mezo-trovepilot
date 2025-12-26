@@ -20,4 +20,18 @@ export const sortedTrovesAbi = [
     inputs: [{ name: '_id', type: 'address' }],
     outputs: [{ name: '', type: 'address' }],
   },
+  {
+    type: 'function',
+    name: 'getLast',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getPrev',
+    stateMutability: 'view',
+    inputs: [{ name: '_id', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
 ] as const;

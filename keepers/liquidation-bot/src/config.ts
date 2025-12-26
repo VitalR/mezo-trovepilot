@@ -18,7 +18,7 @@ export const MCR_ICR = 1_100_000_000_000_000_000n; // 110% in 1e18
 export interface BotConfig {
   rpcUrl: string;
   privateKey: `0x${string}`;
-  externalSignerUrl?: string;
+  unlockedRpcUrl?: string;
   keeperAddress?: Address;
   troveManager: Address;
   sortedTroves: Address;
@@ -29,6 +29,7 @@ export interface BotConfig {
   maxPriorityFeePerGas?: bigint;
   maxNativeSpentPerRun?: bigint;
   maxGasPerJob?: bigint;
+  gasBufferPct: number;
   maxTrovesToScan: number;
   maxTrovesPerJob: number;
   earlyExitScanThreshold: number;
@@ -44,7 +45,7 @@ export function loadConfig(): BotConfig {
   const config: BotConfig = {
     rpcUrl: requireEnv('MEZO_RPC_URL'),
     privateKey: (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`,
-    externalSignerUrl: process.env.EXTERNAL_SIGNER_URL,
+    unlockedRpcUrl: process.env.UNLOCKED_RPC_URL,
     keeperAddress: process.env.KEEPER_ADDRESS as Address | undefined,
     troveManager: (process.env.TROVE_MANAGER_ADDRESS ??
       defaults.troveManager ??
@@ -71,6 +72,7 @@ export function loadConfig(): BotConfig {
     maxGasPerJob: process.env.MAX_GAS_PER_JOB
       ? BigInt(process.env.MAX_GAS_PER_JOB)
       : undefined,
+    gasBufferPct: Number(process.env.GAS_BUFFER_PCT ?? '20'),
     maxTrovesToScan: Number(process.env.MAX_TROVES_TO_SCAN_PER_RUN ?? '500'),
     maxTrovesPerJob: Number(process.env.MAX_TROVES_PER_JOB ?? '20'),
     earlyExitScanThreshold: Number(
@@ -180,19 +182,26 @@ function validateConfig(cfg: BotConfig) {
       throw new Error('Gas/fee bounds must be non-negative');
     }
   }
+  if (cfg.gasBufferPct < 0 || cfg.gasBufferPct > 500) {
+    throw new Error('GAS_BUFFER_PCT must be between 0 and 500');
+  }
 
   // Signer validation
-  const hasExt = Boolean(cfg.externalSignerUrl);
+  const hasExt = Boolean(cfg.unlockedRpcUrl);
   const hasPk = cfg.privateKey && cfg.privateKey.length > 2;
   if (!hasExt && !hasPk) {
     throw new Error(
-      'Provide either KEEPER_PRIVATE_KEY or EXTERNAL_SIGNER_URL + KEEPER_ADDRESS'
+      'Provide either KEEPER_PRIVATE_KEY or UNLOCKED_RPC_URL + KEEPER_ADDRESS'
     );
   }
   if (hasExt) {
-    if (!cfg.keeperAddress)
-      throw new Error(
-        'KEEPER_ADDRESS is required when using EXTERNAL_SIGNER_URL'
+    if (!cfg.keeperAddress) {
+      throw new Error('KEEPER_ADDRESS is required when using UNLOCKED_RPC_URL');
+    }
+    if (hasPk) {
+      log.warn(
+        'Both KEEPER_PRIVATE_KEY and UNLOCKED_RPC_URL provided; defaulting to local private key signer. Clear KEEPER_PRIVATE_KEY to force unlocked RPC usage.'
       );
+    }
   }
 }

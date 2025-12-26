@@ -34,7 +34,7 @@ const LIQ_ENGINE = '0xbeef' as Address;
 describe('executor gas cap', () => {
   it('skips when single liquidation exceeds cap', async () => {
     const { publicClient, walletClient, wasSent } = makeMockClients(1_000_000n);
-    await executeLiquidationJob({
+    const res = await executeLiquidationJob({
       publicClient,
       walletClient,
       liquidationEngine: LIQ_ENGINE,
@@ -43,10 +43,13 @@ describe('executor gas cap', () => {
         maxTxRetries: 0,
         maxGasPerJob: 100_000n,
         maxFeePerGas: 1n,
+        gasBufferPct: 20,
       },
       dryRun: false,
     });
     expect(wasSent()).toBe(false);
+    expect(res.processedBorrowers).toEqual([]);
+    expect(res.leftoverBorrowers).toEqual(['0x1']);
   });
 
   it('shrinks chunk until under cap', async () => {
@@ -76,7 +79,7 @@ describe('executor gas cap', () => {
       wasSent: () => true,
     };
 
-    await executeLiquidationJob({
+    const res = await executeLiquidationJob({
       publicClient,
       walletClient,
       liquidationEngine: LIQ_ENGINE,
@@ -88,10 +91,11 @@ describe('executor gas cap', () => {
         maxTxRetries: 0,
         maxGasPerJob: 150_000n,
         maxFeePerGas: 1n,
+        gasBufferPct: 20,
       },
       dryRun: false,
     });
-    // Sent once after shrinking; no explicit flag, so we just ensure no throw
     expect(wasSent()).toBe(true);
+    expect(res.leftoverBorrowers.length).toBeGreaterThanOrEqual(0);
   });
 });

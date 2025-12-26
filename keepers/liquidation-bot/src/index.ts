@@ -10,7 +10,7 @@ async function main() {
   const config = loadConfig();
   const { publicClient, walletClient, account } = buildClients(config);
 
-  log.info(`Keeper address ${account.address}`);
+  log.info(`Keeper address ${account}`);
 
   const price = await getCurrentPrice({
     client: publicClient,
@@ -38,7 +38,7 @@ async function main() {
     earlyExitThreshold: config.earlyExitScanThreshold,
   });
 
-  const jobs = buildLiquidationJobs({
+  const jobsQueue = buildLiquidationJobs({
     liquidatable: discovery.liquidatableBorrowers,
     maxPerJob: config.maxTrovesPerJob,
     enableFallback: true,
@@ -55,14 +55,15 @@ async function main() {
         threshold: config.earlyExitScanThreshold,
       },
       jobs: {
-        total: jobs.length,
+        total: jobsQueue.length,
         liquidatable: discovery.liquidatableBorrowers.length,
         maxPerJob: config.maxTrovesPerJob,
       },
     })
   );
 
-  for (const job of jobs) {
+  while (jobsQueue.length > 0) {
+    const job = jobsQueue.shift()!;
     await executeLiquidationJob({
       publicClient,
       walletClient,
@@ -75,8 +76,29 @@ async function main() {
         maxPriorityFeePerGas: config.maxPriorityFeePerGas,
         maxNativeSpentPerRun: config.maxNativeSpentPerRun,
         maxGasPerJob: config.maxGasPerJob,
+        gasBufferPct: config.gasBufferPct,
       },
       spendTracker,
+    }).then((res) => {
+      if (res.leftoverBorrowers.length === 0) return;
+
+      if (
+        res.processedBorrowers.length === 0 &&
+        res.leftoverBorrowers.length === job.borrowers.length
+      ) {
+        log.warn(
+          `Skipping re-queue: job could not be processed this run (borrowers=${job.borrowers.length})`
+        );
+        return;
+      }
+
+      jobsQueue.unshift({
+        borrowers: res.leftoverBorrowers,
+        fallbackOnFail: job.fallbackOnFail,
+      });
+      log.warn(
+        `Re-queued leftover borrowers=${res.leftoverBorrowers.length} processed=${res.processedBorrowers.length}`
+      );
     });
   }
 

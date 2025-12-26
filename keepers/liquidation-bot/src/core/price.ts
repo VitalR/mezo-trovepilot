@@ -17,11 +17,11 @@ async function readLatestRound(
   priceFeed: Address
 ): Promise<LatestRound> {
   try {
-    const [roundId, answer, , updatedAt] = (await client.readContract({
+    const [roundId, answer, , updatedAt] = (await (client.readContract as any)({
       address: priceFeed,
       abi: priceFeedAbi,
       functionName: 'latestRoundData',
-    })) as [bigint, bigint, bigint, bigint, bigint];
+    } as const)) as unknown as [bigint, bigint, bigint, bigint, bigint];
 
     return { roundId, answer, updatedAt };
   } catch (err) {
@@ -34,11 +34,11 @@ async function readFetchPrice(
   client: PublicClient,
   priceFeed: Address
 ): Promise<bigint> {
-  return (await client.readContract({
+  return (await (client.readContract as any)({
     address: priceFeed,
     abi: priceFeedAbi,
     functionName: 'fetchPrice',
-  })) as bigint;
+  } as const)) as unknown as bigint;
 }
 
 export async function getCurrentPrice(params: {
@@ -57,13 +57,18 @@ export async function getCurrentPrice(params: {
   if (latest) {
     price = latest.answer;
     updatedAt = latest.updatedAt;
-  } else {
+  } else if (maxAgeSeconds === 0) {
     try {
       price = await readFetchPrice(client, priceFeed);
     } catch (err) {
       log.error('Failed to fetch price', err);
       return null;
     }
+  } else {
+    log.warn(
+      'Price staleness required but latestRoundData unavailable; skipping run'
+    );
+    return null;
   }
 
   if (price === null) return null;
@@ -103,6 +108,10 @@ export async function getCurrentPrice(params: {
     return null;
   }
 
+  if (updatedAt !== null && updatedAt === 0n) {
+    updatedAt = null;
+  }
+
   if (maxAgeSeconds > 0 && updatedAt && updatedAt > 0n) {
     const now = BigInt(Math.floor(Date.now() / 1000));
     const age = now - updatedAt;
@@ -121,6 +130,7 @@ export async function getCurrentPrice(params: {
     }
   } else if (maxAgeSeconds > 0 && updatedAt === null) {
     log.warn('Price staleness cannot be verified (no updatedAt provided)');
+    return null;
   }
 
   return price;

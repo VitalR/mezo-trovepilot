@@ -53,7 +53,7 @@ export async function getLiquidatableTroves(params: {
   let current = (await client.readContract({
     address: sortedTroves,
     abi: sortedTrovesAbi,
-    functionName: 'getFirst',
+    functionName: 'getLast',
   })) as Address;
 
   const liquidatable: Address[] = [];
@@ -82,7 +82,7 @@ export async function getLiquidatableTroves(params: {
     current = (await client.readContract({
       address: sortedTroves,
       abi: sortedTrovesAbi,
-      functionName: 'getNext',
+      functionName: 'getPrev',
       args: [current],
     })) as Address;
 

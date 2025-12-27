@@ -69,10 +69,10 @@ describe('discovery tail scan and early exit', () => {
     });
 
     expect(res.liquidatableBorrowers).toEqual([riskyTail]);
-    expect(res.totalScanned).toBe(3n);
+    expect(res.totalScanned).toBe(2n);
     expect(res.totalBelowMcr).toBe(1n);
     expect((res.stats as DiscoveryStats).earlyExit).toBe(false);
-    expect(visited).toEqual([riskyTail, safeMid, safeHead]); // walk tail -> head
+    expect(visited).toEqual([riskyTail]); // stop after first safe post-liquidatables
   });
 
   it('early exits when threshold reached and none liquidatable (tail first)', async () => {
@@ -121,5 +121,47 @@ describe('discovery tail scan and early exit', () => {
     expect(res.liquidatableBorrowers).toEqual([c]);
     expect(res.totalScanned).toBe(2n);
     expect(res.totalBelowMcr).toBe(1n);
+  });
+
+  it('stops after first safe once liquidatables were found', async () => {
+    const a = '0x1' as Address; // liquidatable
+    const b = '0x2' as Address; // liquidatable
+    const c = '0x3' as Address; // safe, should stop after this
+    const icrMap = {
+      [a]: 800_000_000_000_000_000n,
+      [b]: 900_000_000_000_000_000n,
+      [c]: 1_300_000_000_000_000_000n,
+    };
+    const prevMap = { [c]: b, [b]: a, [a]: ZERO };
+    const visited: Address[] = [];
+    const client = makeMockClient(icrMap, prevMap, c, 3n, visited);
+    const res = await getLiquidatableTroves({
+      client: client as any,
+      troveManager: ZERO,
+      sortedTroves: ZERO,
+      price: 0n,
+      maxToScan: 10,
+      earlyExitThreshold: 0,
+    });
+    expect(res.liquidatableBorrowers).toEqual([b, a]);
+    expect(res.totalScanned).toBe(3n);
+  });
+
+  it('handles safe tail immediately with no liquidatables and respects early exit', async () => {
+    const safeTail = '0x1' as Address;
+    const icrMap = { [safeTail]: 2_000_000_000_000_000_000n };
+    const prevMap = { [safeTail]: ZERO };
+    const client = makeMockClient(icrMap, prevMap, safeTail, 1n);
+    const res = await getLiquidatableTroves({
+      client: client as any,
+      troveManager: ZERO,
+      sortedTroves: ZERO,
+      price: 0n,
+      maxToScan: 5,
+      earlyExitThreshold: 1,
+    });
+    expect(res.liquidatableBorrowers).toEqual([]);
+    expect(res.totalScanned).toBe(1n);
+    expect((res.stats as DiscoveryStats).earlyExit).toBe(true);
   });
 });

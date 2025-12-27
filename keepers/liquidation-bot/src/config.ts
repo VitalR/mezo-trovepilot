@@ -42,6 +42,19 @@ export interface BotConfig {
 export function loadConfig(): BotConfig {
   const defaults = loadAddressDefaults();
 
+  const parseOptionalBigIntEnv = (name: string): bigint | undefined => {
+    const raw = process.env[name];
+    if (!raw || raw === '0') return undefined;
+    const v = BigInt(raw);
+    return v === 0n ? undefined : v;
+  };
+
+  const parseOptionalNumberEnv = (name: string): number | undefined => {
+    const raw = process.env[name];
+    if (raw === undefined || raw === '' || raw === '0') return undefined;
+    return Number(raw);
+  };
+
   const config: BotConfig = {
     rpcUrl: requireEnv('MEZO_RPC_URL'),
     privateKey: (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`,
@@ -60,18 +73,10 @@ export function loadConfig(): BotConfig {
       defaults.priceFeed ??
       requireEnv('PRICE_FEED_ADDRESS')) as Address,
     maxTxRetries: Number(process.env.MAX_TX_RETRIES ?? '2'),
-    maxFeePerGas: process.env.MAX_FEE_PER_GAS
-      ? BigInt(process.env.MAX_FEE_PER_GAS)
-      : undefined,
-    maxPriorityFeePerGas: process.env.MAX_PRIORITY_FEE_PER_GAS
-      ? BigInt(process.env.MAX_PRIORITY_FEE_PER_GAS)
-      : undefined,
-    maxNativeSpentPerRun: process.env.MAX_NATIVE_SPENT_PER_RUN
-      ? BigInt(process.env.MAX_NATIVE_SPENT_PER_RUN)
-      : undefined,
-    maxGasPerJob: process.env.MAX_GAS_PER_JOB
-      ? BigInt(process.env.MAX_GAS_PER_JOB)
-      : undefined,
+    maxFeePerGas: parseOptionalBigIntEnv('MAX_FEE_PER_GAS'),
+    maxPriorityFeePerGas: parseOptionalBigIntEnv('MAX_PRIORITY_FEE_PER_GAS'),
+    maxNativeSpentPerRun: parseOptionalBigIntEnv('MAX_NATIVE_SPENT_PER_RUN'),
+    maxGasPerJob: parseOptionalBigIntEnv('MAX_GAS_PER_JOB'),
     gasBufferPct: Number(process.env.GAS_BUFFER_PCT ?? '20'),
     maxTrovesToScan: Number(process.env.MAX_TROVES_TO_SCAN_PER_RUN ?? '500'),
     maxTrovesPerJob: Number(process.env.MAX_TROVES_PER_JOB ?? '20'),

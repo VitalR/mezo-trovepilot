@@ -17,11 +17,12 @@ async function readLatestRound(
   priceFeed: Address
 ): Promise<LatestRound> {
   try {
-    const [roundId, answer, , updatedAt] = (await (client.readContract as any)({
+    const latest = (await client.readContract({
       address: priceFeed,
       abi: priceFeedAbi,
       functionName: 'latestRoundData',
     } as const)) as unknown as [bigint, bigint, bigint, bigint, bigint];
+    const [roundId, answer, , updatedAt] = latest;
 
     return { roundId, answer, updatedAt };
   } catch (err) {
@@ -34,11 +35,12 @@ async function readFetchPrice(
   client: PublicClient,
   priceFeed: Address
 ): Promise<bigint> {
+  // Narrowing the overloads for non-latestRoundData calls is awkward; cast for clarity.
   return (await (client.readContract as any)({
     address: priceFeed,
     abi: priceFeedAbi,
     functionName: 'fetchPrice',
-  } as const)) as unknown as bigint;
+  })) as bigint;
 }
 
 export async function getCurrentPrice(params: {

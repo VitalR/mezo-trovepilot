@@ -7,6 +7,9 @@ function makeMockClients(gas: bigint, shouldFail: boolean = false) {
   let sent = false;
   return {
     publicClient: {
+      async estimateFeesPerGas() {
+        throw new Error('no eip1559');
+      },
       async estimateContractGas() {
         return gas;
       },
@@ -53,8 +56,12 @@ describe('executor gas cap', () => {
   });
 
   it('shrinks chunk until under cap', async () => {
+    let sent = false;
     const { publicClient, walletClient, wasSent } = {
       publicClient: {
+        async estimateFeesPerGas() {
+          throw new Error('no eip1559');
+        },
         async estimateContractGas(opts: any) {
           const borrowerCount = opts.args[0].length;
           return borrowerCount === 1 ? 80_000n : 200_000n;
@@ -68,11 +75,13 @@ describe('executor gas cap', () => {
       } as any,
       walletClient: {
         account: '0xabc' as Address,
-        async writeContract() {
+        async writeContract(args: any) {
+          sent = true;
+          expect(args.args[0]).toEqual(['0x1', '0x2'].slice(0, 1));
           return '0xhash';
         },
       } as any,
-      wasSent: () => true,
+      wasSent: () => sent,
     };
 
     const res = await executeLiquidationJob({
@@ -96,5 +105,72 @@ describe('executor gas cap', () => {
     expect(res.leftoverBorrowers.length + res.processedBorrowers.length).toBe(
       2
     );
+  });
+
+  it('shrinks multiple times and preserves suffix leftovers', async () => {
+    let sent = false;
+    const publicClient = {
+      async estimateFeesPerGas() {
+        throw new Error('no eip1559');
+      },
+      async estimateContractGas(opts: any) {
+        const count = opts.args[0].length;
+        if (count >= 8) return 400_000n;
+        if (count >= 4) return 220_000n;
+        if (count >= 2) return 140_000n;
+        return 60_000n;
+      },
+      async getGasPrice() {
+        return 1n;
+      },
+      async waitForTransactionReceipt() {
+        return { status: 'success', gasUsed: 60_000n };
+      },
+    } as any;
+    const walletClient = {
+      account: '0xabc' as Address,
+      async writeContract(args: any) {
+        sent = true;
+        return '0xhash';
+      },
+    } as any;
+
+    const res = await executeLiquidationJob({
+      publicClient,
+      walletClient,
+      liquidationEngine: LIQ_ENGINE,
+      job: {
+        borrowers: [
+          '0x1' as Address,
+          '0x2' as Address,
+          '0x3' as Address,
+          '0x4' as Address,
+          '0x5' as Address,
+          '0x6' as Address,
+          '0x7' as Address,
+          '0x8' as Address,
+        ],
+        fallbackOnFail: true,
+      },
+      config: {
+        maxTxRetries: 0,
+        maxGasPerJob: 150_000n,
+        maxFeePerGas: 1n,
+        gasBufferPct: 20,
+      },
+      dryRun: false,
+    });
+
+    expect(sent).toBe(true);
+    expect(res.processedBorrowers).toEqual(['0x1']);
+    expect(res.leftoverBorrowers).toEqual([
+      '0x2',
+      '0x3',
+      '0x4',
+      '0x5',
+      '0x6',
+      '0x7',
+      '0x8',
+    ]);
   });
 });

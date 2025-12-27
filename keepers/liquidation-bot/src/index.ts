@@ -3,12 +3,20 @@ import { buildClients } from './clients/mezoClient.js';
 import { getLiquidatableTroves } from './core/discovery.js';
 import { buildLiquidationJobs } from './core/jobs.js';
 import { executeLiquidationJob } from './core/executor.js';
-import { log } from './core/logging.js';
+import { log, setLogContext } from './core/logging.js';
 import { getCurrentPrice } from './core/price.js';
 
 async function main() {
   const config = loadConfig();
   const { publicClient, walletClient, account } = buildClients(config);
+
+  const runId = `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+  setLogContext({
+    component: 'keeper',
+    keeper: account,
+    network: process.env.NETWORK ?? 'mezo-testnet',
+    runId,
+  });
 
   log.info(`Keeper address ${account}`);
 
@@ -45,23 +53,22 @@ async function main() {
     enableFallback: true,
   });
 
-  log.info(
-    JSON.stringify({
-      discovery: {
-        scanned: discovery.stats.scanned,
-        liquidatable: discovery.stats.liquidatable,
-        belowMcr: discovery.stats.belowMcr,
-        earlyExit: discovery.stats.earlyExit,
-        maxScan: config.maxTrovesToScan,
-        threshold: config.earlyExitScanThreshold,
-      },
-      jobs: {
-        total: jobsQueue.length,
-        liquidatable: discovery.liquidatableBorrowers.length,
-        maxPerJob: config.maxTrovesPerJob,
-      },
-    })
-  );
+  log.jsonInfo('run_summary', {
+    component: 'index',
+    discovery: {
+      scanned: discovery.stats.scanned,
+      liquidatable: discovery.stats.liquidatable,
+      belowMcr: discovery.stats.belowMcr,
+      earlyExit: discovery.stats.earlyExit,
+      maxScan: config.maxTrovesToScan,
+      threshold: config.earlyExitScanThreshold,
+    },
+    jobs: {
+      total: jobsQueue.length,
+      liquidatable: discovery.liquidatableBorrowers.length,
+      maxPerJob: config.maxTrovesPerJob,
+    },
+  });
 
   while (jobsQueue.length > 0) {
     const job = jobsQueue.shift()!;
@@ -99,9 +106,11 @@ async function main() {
         continue;
       }
       skippedBorrowers.add(key);
-      log.warn(
-        `Skipping re-queue: job could not be processed this run (borrowers=${job.borrowers.length})`
-      );
+      log.jsonInfo('requeue_skip', {
+        component: 'index',
+        reason: 'UNPROCESSABLE_THIS_RUN',
+        borrowers: res.leftoverBorrowers.length,
+      });
       continue;
     }
 
@@ -109,9 +118,11 @@ async function main() {
       borrowers: res.leftoverBorrowers,
       fallbackOnFail: job.fallbackOnFail,
     });
-    log.warn(
-      `Re-queued leftover borrowers=${res.leftoverBorrowers.length} processed=${res.processedBorrowers.length}`
-    );
+    log.jsonInfo('requeue', {
+      component: 'index',
+      processedCount: res.processedBorrowers.length,
+      leftoverCount: res.leftoverBorrowers.length,
+    });
   }
 
   log.info('Done');

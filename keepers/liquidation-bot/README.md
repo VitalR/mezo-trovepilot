@@ -19,6 +19,7 @@ npm install
   - `UNLOCKED_RPC_URL`
   - `KEEPER_ADDRESS`
 - Optional gas controls: `MAX_TX_RETRIES`, `MAX_FEE_PER_GAS`, `MAX_PRIORITY_FEE_PER_GAS`, `MAX_NATIVE_SPENT_PER_RUN`, `MAX_GAS_PER_JOB`, `GAS_BUFFER_PCT`
+  - Set to blank or `0` to disable caps/overrides (auto fee estimation via `estimateFeesPerGas` is used when unset).
 - `TROVE_MANAGER_ADDRESS`, `SORTED_TROVES_ADDRESS`, `LIQUIDATION_ENGINE_ADDRESS`, `PRICE_FEED_ADDRESS`
 - Optional discovery/price bounds: `MAX_TROVES_TO_SCAN_PER_RUN`, `MAX_TROVES_PER_JOB`, `EARLY_EXIT_SCAN_THRESHOLD`, `MIN_BTC_PRICE`, `MAX_BTC_PRICE`, `MAX_PRICE_AGE_SECONDS`
 - Optional: `DRY_RUN`
@@ -27,9 +28,9 @@ npm install
 
 - Config / signer: loads env (optionally from `CONFIG_PATH`/`NETWORK`), validates bounds. Default signer is a small hot key via `KEEPER_PRIVATE_KEY`. Optional unlocked RPC path (`UNLOCKED_RPC_URL` + `KEEPER_ADDRESS`) is used only when the node supports `eth_sendTransaction` and no private key is provided.
 - Price: reads price feed in 1e18 units, enforces min/max bounds, and optional staleness. If `MAX_PRICE_AGE_SECONDS > 0` and `updatedAt` is unavailable or stale, the bot skips the run (fail closed). Fallback to `fetchPrice` only when staleness is not required.
-- Discovery: scans `SortedTroves` from the tail (risky end) using `getLast` then `getPrev`, up to `MAX_TROVES_TO_SCAN_PER_RUN`. Early-exits if `EARLY_EXIT_SCAN_THRESHOLD` is hit with no liquidatables. Uses `MCR_ICR = 1.1e18`.
+- Discovery: scans `SortedTroves` from the tail (risky end) using `getLast` then `getPrev`, up to `MAX_TROVES_TO_SCAN_PER_RUN`. Early-exits if `EARLY_EXIT_SCAN_THRESHOLD` is hit with no liquidatables, and stops once it finds a safe trove after any liquidatable (tail segment property). Uses `MCR_ICR = 1.1e18`.
 - Jobs: chunks liquidatable borrowers into batches of `MAX_TROVES_PER_JOB`.
-- Execution: applies a gas buffer (`GAS_BUFFER_PCT`), enforces `MAX_GAS_PER_JOB` by shrinking batches (and re-queuing leftovers), re-estimates gas on first retry, and enforces `MAX_NATIVE_SPENT_PER_RUN`. Sends `liquidateRange` with optional fee caps and retries non-logic errors up to `MAX_TX_RETRIES`. Spend tracking updates with receipt-based actual cost; clear logs indicate shrink/skip/requeue.
+- Execution: applies a gas buffer (`GAS_BUFFER_PCT`), enforces `MAX_GAS_PER_JOB` by shrinking batches (and re-queuing suffix leftovers), re-estimates gas on first retry, and enforces `MAX_NATIVE_SPENT_PER_RUN`. Sends `liquidateRange` with auto fee estimation when caps are unset; retries non-logic errors up to `MAX_TX_RETRIES`. Spend tracking updates with receipt-based actual cost; structured JSON logs cover plan/shrink/skip/tx/retry/requeue.
 
 ### Run
 
@@ -59,3 +60,4 @@ npm test
 - Discovery is sequential; consider multicall/batching and smarter gas heuristics to reduce RPC round-trips.
 - Executor re-queues leftovers when gas-capped; still add visibility/metrics to alert on repeated splits/skips.
 - Add metrics/telemetry and richer retry/backoff policies for production.
+- Ops guidance: start with `GAS_BUFFER_PCT=20`, `MAX_GAS_PER_JOB` tuned to chain block gas, `MAX_NATIVE_SPENT_PER_RUN` set to a small per-run limit, `MAX_TX_RETRIES=1`. Watch JSON logs for `job_skip`, `job_shrink`, `tx_sent`, `tx_confirmed`, and `requeue` to debug caps and spend behavior.

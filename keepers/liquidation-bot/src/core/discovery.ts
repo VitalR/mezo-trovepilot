@@ -77,6 +77,13 @@ export async function getLiquidatableTroves(params: {
     if (icr < MCR_ICR) {
       liquidatable.push(current);
       belowMcr += 1n;
+    } else if (liquidatable.length > 0) {
+      log.jsonInfo('discovery_stop_after_safe', {
+        component: 'discovery',
+        current,
+      });
+      checked += 1n;
+      break;
     }
 
     current = (await client.readContract({
@@ -94,16 +101,25 @@ export async function getLiquidatableTroves(params: {
       liquidatable.length === 0
     ) {
       earlyExit = true;
-      log.info(
-        `Early-exit threshold hit scanned=${checked} liquidatable=${liquidatable.length} maxScan=${maxScanBig} threshold=${earlyExitThreshold}`
-      );
+      log.jsonInfo('discovery_early_exit', {
+        component: 'discovery',
+        scanned: Number(checked),
+        liquidatable: liquidatable.length,
+        maxScan: Number(maxScanBig),
+        threshold: earlyExitThreshold,
+      });
       break;
     }
   }
 
-  log.info(
-    `Discovery checked=${checked} liquidatable=${liquidatable.length} belowMCR=${belowMcr}`
-  );
+  log.jsonInfo('discovery_summary', {
+    component: 'discovery',
+    checked: Number(checked),
+    liquidatable: liquidatable.length,
+    belowMcr: Number(belowMcr),
+    earlyExit,
+    maxScan: Number(maxScanBig),
+  });
   return {
     liquidatableBorrowers: liquidatable,
     totalScanned: checked,

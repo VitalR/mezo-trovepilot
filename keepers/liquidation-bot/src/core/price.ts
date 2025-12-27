@@ -25,7 +25,7 @@ async function readLatestRound(
 
     return { roundId, answer, updatedAt };
   } catch (err) {
-    log.warn('latestRoundData unavailable; falling back to fetchPrice', err);
+    log.warn('latestRoundData unavailable; cannot verify staleness', err);
     return null;
   }
 }

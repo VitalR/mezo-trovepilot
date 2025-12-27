@@ -53,26 +53,22 @@ describe('executor gas cap', () => {
   });
 
   it('shrinks chunk until under cap', async () => {
-    // Start with 2 borrowers; we simulate gas proportional to borrowers (mock returns 200_000)
-    let currentGas = 200_000n;
     const { publicClient, walletClient, wasSent } = {
       publicClient: {
-        async estimateContractGas() {
-          return currentGas;
+        async estimateContractGas(opts: any) {
+          const borrowerCount = opts.args[0].length;
+          return borrowerCount === 1 ? 80_000n : 200_000n;
         },
         async getGasPrice() {
           return 1n;
         },
         async waitForTransactionReceipt() {
-          return { status: 'success', gasUsed: currentGas };
+          return { status: 'success', gasUsed: 80_000n };
         },
       } as any,
       walletClient: {
         account: '0xabc' as Address,
-        async writeContract(args: any) {
-          // Simulate that when we retry with fewer borrowers, gas drops
-          const borrowerCount = args.args[0].length;
-          currentGas = borrowerCount === 1 ? 80_000n : 200_000n;
+        async writeContract() {
           return '0xhash';
         },
       } as any,
@@ -96,6 +92,9 @@ describe('executor gas cap', () => {
       dryRun: false,
     });
     expect(wasSent()).toBe(true);
-    expect(res.leftoverBorrowers.length).toBeGreaterThanOrEqual(0);
+    expect(res.processedBorrowers.length).toBeGreaterThanOrEqual(1);
+    expect(res.leftoverBorrowers.length + res.processedBorrowers.length).toBe(
+      2
+    );
   });
 });

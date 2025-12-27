@@ -28,6 +28,7 @@ async function main() {
   log.info(`Using price (1e18)=${price.toString()}`);
 
   const spendTracker = { spent: 0n };
+  const skippedBorrowers = new Set<string>();
 
   const discovery = await getLiquidatableTroves({
     client: publicClient,
@@ -64,7 +65,7 @@ async function main() {
 
   while (jobsQueue.length > 0) {
     const job = jobsQueue.shift()!;
-    await executeLiquidationJob({
+    const res = await executeLiquidationJob({
       publicClient,
       walletClient,
       liquidationEngine: config.liquidationEngine,
@@ -79,27 +80,38 @@ async function main() {
         gasBufferPct: config.gasBufferPct,
       },
       spendTracker,
-    }).then((res) => {
-      if (res.leftoverBorrowers.length === 0) return;
-
-      if (
-        res.processedBorrowers.length === 0 &&
-        res.leftoverBorrowers.length === job.borrowers.length
-      ) {
-        log.warn(
-          `Skipping re-queue: job could not be processed this run (borrowers=${job.borrowers.length})`
-        );
-        return;
-      }
-
-      jobsQueue.unshift({
-        borrowers: res.leftoverBorrowers,
-        fallbackOnFail: job.fallbackOnFail,
-      });
-      log.warn(
-        `Re-queued leftover borrowers=${res.leftoverBorrowers.length} processed=${res.processedBorrowers.length}`
-      );
     });
+
+    if (res.leftoverBorrowers.length === 0) {
+      continue;
+    }
+
+    const key = res.leftoverBorrowers.join(',');
+    const unprocessed =
+      res.processedBorrowers.length === 0 &&
+      res.leftoverBorrowers.length === job.borrowers.length;
+
+    if (unprocessed) {
+      if (skippedBorrowers.has(key)) {
+        log.warn(
+          `Not re-queuing borrowers (${res.leftoverBorrowers.length}); already skipped this run due to caps`
+        );
+        continue;
+      }
+      skippedBorrowers.add(key);
+      log.warn(
+        `Skipping re-queue: job could not be processed this run (borrowers=${job.borrowers.length})`
+      );
+      continue;
+    }
+
+    jobsQueue.unshift({
+      borrowers: res.leftoverBorrowers,
+      fallbackOnFail: job.fallbackOnFail,
+    });
+    log.warn(
+      `Re-queued leftover borrowers=${res.leftoverBorrowers.length} processed=${res.processedBorrowers.length}`
+    );
   }
 
   log.info('Done');

@@ -1,4 +1,4 @@
-import { Address } from 'viem';
+import { Account, Address } from 'viem';
 import { PublicClient, WalletClient } from '../clients/mezoClient.js';
 import { liquidationEngineAbi } from '../abis/liquidationEngineAbi.js';
 import { LiquidationJob } from './jobs.js';
@@ -30,6 +30,11 @@ export async function executeLiquidationJob(params: {
   const { publicClient, walletClient, liquidationEngine, job, dryRun, config } =
     params;
   const spendTracker = params.spendTracker ?? { spent: 0n };
+  const walletAccount: Account | Address | null = walletClient.account ?? null;
+
+  const originalBorrowers = [...job.borrowers];
+  let currentBorrowers = [...job.borrowers];
+  let leftoverBorrowers: Address[] = [];
 
   if (dryRun) {
     log.info(
@@ -42,68 +47,99 @@ export async function executeLiquidationJob(params: {
     `Submitting liquidation: count=${job.borrowers.length} fallback=${job.fallbackOnFail}`
   );
 
-  const originalBorrowers = [...job.borrowers];
-  let borrowers = [...job.borrowers];
-
   async function estimate(bList: Address[]) {
     return publicClient.estimateContractGas({
       address: liquidationEngine,
       abi: liquidationEngineAbi,
       functionName: 'liquidateRange',
       args: [bList, job.fallbackOnFail],
-      account: walletClient.account,
+      account: walletAccount ?? undefined,
     });
   }
 
-  let gasEstimate = await estimate(borrowers);
   const bufferPct = config.gasBufferPct ?? 0;
   const applyBuffer = (g: bigint) => (g * BigInt(100 + bufferPct)) / 100n;
-  gasEstimate = applyBuffer(gasEstimate);
-
-  if (config.maxGasPerJob !== undefined && config.maxGasPerJob > 0n) {
-    while (borrowers.length > 1 && gasEstimate > config.maxGasPerJob) {
-      const before = borrowers.length;
-      const nextCount = Math.max(1, Math.ceil(borrowers.length / 2));
-      borrowers = borrowers.slice(0, nextCount);
-      log.warn(
-        `Shrinking job for gas cap: before=${before} after=${
-          borrowers.length
-        } maxGasPerJob=${config.maxGasPerJob.toString()}`
-      );
-      gasEstimate = applyBuffer(await estimate(borrowers));
-    }
-    if (gasEstimate > config.maxGasPerJob) {
-      log.warn(
-        `Skipping job: estimated gas ${gasEstimate.toString()} exceeds MAX_GAS_PER_JOB ${config.maxGasPerJob.toString()} (borrowers=${
-          borrowers.length
-        })`
-      );
-      return {
-        processedBorrowers: [],
-        leftoverBorrowers: originalBorrowers,
-      };
-    }
-  }
-
-  const gasEstimateBorrowers = borrowers;
-  const leftoverBorrowers = originalBorrowers.slice(
-    gasEstimateBorrowers.length
-  );
 
   const maxFeePerGas =
     config.maxFeePerGas ?? (await publicClient.getGasPrice());
   const maxPriorityFeePerGas = config.maxPriorityFeePerGas;
 
-  let estimatedCost = gasEstimate * maxFeePerGas;
-  if (config.maxNativeSpentPerRun !== undefined) {
-    const projected = spendTracker.spent + estimatedCost;
-    if (projected > config.maxNativeSpentPerRun) {
-      log.warn(
-        `Skipping job: projected native spend ${projected.toString()} exceeds MAX_NATIVE_SPENT_PER_RUN ${config.maxNativeSpentPerRun.toString()}`
-      );
-      return { processedBorrowers: [], leftoverBorrowers: originalBorrowers };
+  async function planForBorrowers(
+    allBorrowers: Address[],
+    currentSpend: bigint
+  ) {
+    let working = [...allBorrowers];
+    let gasEstimate = applyBuffer(await estimate(working));
+
+    if (config.maxGasPerJob !== undefined && config.maxGasPerJob > 0n) {
+      while (working.length > 1 && gasEstimate > config.maxGasPerJob) {
+        const before = working.length;
+        const nextCount = Math.max(1, Math.ceil(working.length / 2));
+        working = working.slice(0, nextCount);
+        log.warn(
+          `Shrinking job for gas cap: before=${before} after=${
+            working.length
+          } maxGasPerJob=${config.maxGasPerJob.toString()}`
+        );
+        gasEstimate = applyBuffer(await estimate(working));
+      }
+      if (gasEstimate > config.maxGasPerJob) {
+        log.warn(
+          `Skipping job: estimated gas ${gasEstimate.toString()} exceeds MAX_GAS_PER_JOB ${config.maxGasPerJob.toString()} (borrowers=${
+            working.length
+          })`
+        );
+        return {
+          ok: false,
+          reason: 'GAS_CAP',
+          gasEstimate,
+          working,
+          leftover: allBorrowers,
+        } as const;
+      }
     }
+
+    const leftover = allBorrowers.slice(working.length);
+    const estimatedCost = gasEstimate * maxFeePerGas;
+    if (
+      config.maxNativeSpentPerRun !== undefined &&
+      currentSpend + estimatedCost > config.maxNativeSpentPerRun
+    ) {
+      log.warn(
+        `Skipping job: projected native spend ${(
+          currentSpend + estimatedCost
+        ).toString()} exceeds MAX_NATIVE_SPENT_PER_RUN ${config.maxNativeSpentPerRun.toString()}`
+      );
+      return {
+        ok: false,
+        reason: 'SPEND_CAP',
+        gasEstimate,
+        working,
+        leftover: allBorrowers,
+      } as const;
+    }
+
+    return {
+      ok: true,
+      working,
+      gasEstimate,
+      leftover,
+      estimatedCost,
+    } as const;
   }
+
+  const initialPlan = await planForBorrowers(
+    currentBorrowers,
+    spendTracker.spent
+  );
+  if (!initialPlan.ok) {
+    return { processedBorrowers: [], leftoverBorrowers: originalBorrowers };
+  }
+
+  currentBorrowers = initialPlan.working;
+  leftoverBorrowers = initialPlan.leftover;
+  let gasEstimate = initialPlan.gasEstimate;
+  let estimatedCost = initialPlan.estimatedCost;
 
   let attempt = 0;
   let lastErr: unknown;
@@ -114,19 +150,29 @@ export async function executeLiquidationJob(params: {
         await new Promise((r) => setTimeout(r, backoffMs));
         // Re-estimate once on first retry to adapt to state change
         if (attempt === 1) {
-          gasEstimate = applyBuffer(await estimate(gasEstimateBorrowers));
-          estimatedCost = gasEstimate * maxFeePerGas;
+          const replan = await planForBorrowers(
+            currentBorrowers,
+            spendTracker.spent
+          );
+          if (!replan.ok) {
+            return {
+              processedBorrowers: [],
+              leftoverBorrowers: originalBorrowers,
+            };
+          }
+          leftoverBorrowers = leftoverBorrowers.concat(replan.leftover);
+          currentBorrowers = replan.working;
+          gasEstimate = replan.gasEstimate;
+          estimatedCost = replan.estimatedCost;
         }
       }
 
-      const hash = await (walletClient.writeContract as any)({
+      const hash = await walletClient.writeContract({
         address: liquidationEngine,
         abi: liquidationEngineAbi,
         functionName: 'liquidateRange',
-        args: [gasEstimateBorrowers, job.fallbackOnFail],
-        account: ((walletClient as any).account ?? null) as
-          | `0x${string}`
-          | null,
+        args: [currentBorrowers, job.fallbackOnFail],
+        account: walletAccount,
         maxFeePerGas,
         maxPriorityFeePerGas,
         gas: gasEstimate,
@@ -136,7 +182,7 @@ export async function executeLiquidationJob(params: {
       log.info(
         `Tx sent: ${hash} (gas=${gasEstimate.toString()} maxFeePerGas=${maxFeePerGas.toString()} fallback=${
           job.fallbackOnFail
-        } borrowers=${gasEstimateBorrowers.length})`
+        } borrowers=${currentBorrowers.length})`
       );
 
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
@@ -151,7 +197,7 @@ export async function executeLiquidationJob(params: {
 
       spendTracker.spent += actualCost;
       return {
-        processedBorrowers: gasEstimateBorrowers,
+        processedBorrowers: currentBorrowers,
         leftoverBorrowers,
       };
     } catch (err) {

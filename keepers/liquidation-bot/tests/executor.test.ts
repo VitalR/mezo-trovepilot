@@ -3,7 +3,7 @@ import { Address } from 'viem';
 import { executeLiquidationJob } from '../src/core/executor.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address;
-const addr = (n: number) => (`0x${n.toString(16)}`.padEnd(42, '0')) as Address;
+const addr = (n: number) => `0x${n.toString(16)}`.padEnd(42, '0') as Address;
 
 function makeClients() {
   const estimateContractGas = vi.fn();
@@ -101,6 +101,94 @@ describe('executor gas handling and splitting', () => {
     expect(res.processedBorrowers).toEqual([addr(1)]);
   });
 
+  it('rechecks gas cap after retry re-estimation and skips without sending second tx when over cap', async () => {
+    const { publicClient, walletClient } = makeClients();
+    publicClient.estimateContractGas
+      .mockResolvedValueOnce(50n) // initial ok
+      .mockResolvedValueOnce(200n); // retry spikes -> over cap after buffer (220)
+    publicClient.getGasPrice.mockResolvedValue(1n);
+    walletClient.writeContract.mockRejectedValueOnce(
+      new Error('network issue')
+    );
+
+    const res = await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 1,
+        maxGasPerJob: 100n,
+        maxNativeSpentPerRun: 10_000n,
+        gasBufferPct: 10,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1); // first attempt only
+    expect(res.processedBorrowers).toEqual([]);
+    expect(res.leftoverBorrowers).toEqual([addr(1)]);
+  });
+
+  it('rechecks spend cap after retry re-estimation and keeps all borrowers as leftovers', async () => {
+    const { publicClient, walletClient } = makeClients();
+    publicClient.estimateContractGas
+      .mockResolvedValueOnce(20n) // initial ok (buffer 22)
+      .mockResolvedValueOnce(40n); // retry (buffer 44) -> spend exceeds cap 30
+    publicClient.getGasPrice.mockResolvedValue(1n);
+    walletClient.writeContract.mockRejectedValueOnce(
+      new Error('network issue')
+    );
+
+    const res = await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1), addr(2)], fallbackOnFail: false },
+      dryRun: false,
+      config: {
+        maxTxRetries: 1,
+        maxGasPerJob: 0n,
+        maxNativeSpentPerRun: 30n,
+        gasBufferPct: 10,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1); // first attempt only
+    expect(res.processedBorrowers).toEqual([]);
+    expect(res.leftoverBorrowers).toEqual([addr(1), addr(2)]);
+  });
+
+  it('does not retry logic reverts', async () => {
+    const { publicClient, walletClient } = makeClients();
+    publicClient.estimateContractGas.mockResolvedValue(10n);
+    publicClient.getGasPrice.mockResolvedValue(1n);
+    walletClient.writeContract.mockRejectedValueOnce(
+      new Error('execution reverted')
+    );
+
+    const res = await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 2,
+        maxGasPerJob: 0n,
+        maxNativeSpentPerRun: 1_000n,
+        gasBufferPct: 0,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
+    expect(res.processedBorrowers).toEqual([]);
+    expect(res.leftoverBorrowers).toEqual([addr(1)]);
+  });
+
   it('skips when projected spend exceeds cap without dropping borrowers silently', async () => {
     const { publicClient, walletClient } = makeClients();
     publicClient.estimateContractGas.mockResolvedValue(10n);
@@ -126,4 +214,3 @@ describe('executor gas handling and splitting', () => {
     expect(res.leftoverBorrowers).toEqual([addr(1), addr(2)]);
   });
 });
-

@@ -20,11 +20,15 @@ export function buildClients(config: BotConfig) {
   }
 
   if (config.unlockedRpcUrl && config.keeperAddress) {
+    const unlockedAccount = {
+      address: config.keeperAddress,
+      type: 'json-rpc' as const,
+    };
     const walletClient = createWalletClient({
       transport: http(config.unlockedRpcUrl),
-      account: config.keeperAddress,
+      account: unlockedAccount,
     });
-    return { publicClient, walletClient, account: config.keeperAddress };
+    return { publicClient, walletClient, account: unlockedAccount.address };
   }
 
   throw new Error(

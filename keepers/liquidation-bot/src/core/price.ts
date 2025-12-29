@@ -14,7 +14,8 @@ type LatestRound = {
 
 async function readLatestRound(
   client: PublicClient,
-  priceFeed: Address
+  priceFeed: Address,
+  maxAgeSeconds: number
 ): Promise<LatestRound> {
   try {
     const latest = (await client.readContract({
@@ -26,7 +27,21 @@ async function readLatestRound(
 
     return { roundId, answer, updatedAt };
   } catch (err) {
-    log.warn('latestRoundData unavailable; cannot verify staleness', err);
+    if (maxAgeSeconds > 0) {
+      log.exception('price_unverifiable_staleness', err, {
+        component: 'price',
+        reason: 'latestRoundData_unavailable',
+      });
+      return null;
+    }
+    log.exception(
+      'price_latestRoundData_unavailable_fallback_fetchPrice',
+      err,
+      {
+        component: 'price',
+        reason: 'latestRoundData_unavailable',
+      }
+    );
     return null;
   }
 }
@@ -55,7 +70,7 @@ export async function getCurrentPrice(params: {
   let price: bigint | null = null;
   let updatedAt: bigint | null = null;
 
-  const latest = await readLatestRound(client, priceFeed);
+  const latest = await readLatestRound(client, priceFeed, maxAgeSeconds);
   if (latest) {
     price = latest.answer;
     updatedAt = latest.updatedAt;
@@ -75,38 +90,40 @@ export async function getCurrentPrice(params: {
 
   if (price === null) return null;
   if (price <= 0n) {
-    log.warn(`Price feed returned non-positive price: ${price.toString()}`);
+    log.jsonWarn('price_out_of_bounds', {
+      component: 'price',
+      reason: 'NON_POSITIVE',
+      price: price.toString(),
+    });
     return null;
   }
 
   if (minPrice > 0n && price < minPrice) {
-    log.warn(
-      JSON.stringify({
-        reason: 'OUT_OF_BOUNDS',
-        price: price.toString(),
-        min: minPrice.toString(),
-        max: maxPrice > 0n ? maxPrice.toString() : undefined,
-        maxAgeSeconds: maxAgeSeconds || undefined,
-        ageSeconds: updatedAt
-          ? Number(BigInt(Math.floor(Date.now() / 1000)) - updatedAt)
-          : undefined,
-      })
-    );
+    log.jsonWarn('price_out_of_bounds', {
+      component: 'price',
+      reason: 'OUT_OF_BOUNDS_LOW',
+      price: price.toString(),
+      min: minPrice.toString(),
+      max: maxPrice > 0n ? maxPrice.toString() : undefined,
+      maxAgeSeconds: maxAgeSeconds || undefined,
+      ageSeconds: updatedAt
+        ? Number(BigInt(Math.floor(Date.now() / 1000)) - updatedAt)
+        : undefined,
+    });
     return null;
   }
   if (maxPrice > 0n && price > maxPrice) {
-    log.warn(
-      JSON.stringify({
-        reason: 'OUT_OF_BOUNDS',
-        price: price.toString(),
-        min: minPrice > 0n ? minPrice.toString() : undefined,
-        max: maxPrice.toString(),
-        maxAgeSeconds: maxAgeSeconds || undefined,
-        ageSeconds: updatedAt
-          ? Number(BigInt(Math.floor(Date.now() / 1000)) - updatedAt)
-          : undefined,
-      })
-    );
+    log.jsonWarn('price_out_of_bounds', {
+      component: 'price',
+      reason: 'OUT_OF_BOUNDS_HIGH',
+      price: price.toString(),
+      min: minPrice > 0n ? minPrice.toString() : undefined,
+      max: maxPrice.toString(),
+      maxAgeSeconds: maxAgeSeconds || undefined,
+      ageSeconds: updatedAt
+        ? Number(BigInt(Math.floor(Date.now() / 1000)) - updatedAt)
+        : undefined,
+    });
     return null;
   }
 
@@ -118,20 +135,21 @@ export async function getCurrentPrice(params: {
     const now = BigInt(Math.floor(Date.now() / 1000));
     const age = now - updatedAt;
     if (age > BigInt(maxAgeSeconds)) {
-      log.warn(
-        JSON.stringify({
-          reason: 'STALE',
-          price: price.toString(),
-          ageSeconds: Number(age),
-          maxAgeSeconds,
-          min: minPrice > 0n ? minPrice.toString() : undefined,
-          max: maxPrice > 0n ? maxPrice.toString() : undefined,
-        })
-      );
+      log.jsonWarn('price_stale', {
+        component: 'price',
+        price: price.toString(),
+        ageSeconds: Number(age),
+        maxAgeSeconds,
+        min: minPrice > 0n ? minPrice.toString() : undefined,
+        max: maxPrice > 0n ? maxPrice.toString() : undefined,
+      });
       return null;
     }
   } else if (maxAgeSeconds > 0 && updatedAt === null) {
-    log.warn('Price staleness cannot be verified (no updatedAt provided)');
+    log.jsonWarn('price_unverifiable_staleness', {
+      component: 'price',
+      reason: 'missing_updatedAt',
+    });
     return null;
   }
 

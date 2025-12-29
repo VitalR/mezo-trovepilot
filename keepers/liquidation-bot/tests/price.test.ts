@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Address } from 'viem';
 import { getCurrentPrice } from '../src/core/price.js';
 
@@ -7,6 +7,7 @@ const NOW = Math.floor(Date.now() / 1000);
 
 describe('price freshness policy', () => {
   it('returns null when staleness required and latestRoundData unavailable', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const client = {
       readContract: async () => {
         throw new Error('no latestRoundData');
@@ -22,9 +23,18 @@ describe('price freshness policy', () => {
     });
 
     expect(res).toBeNull();
+    const evt = consoleSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l))
+      .find((p: any) => p.event === 'price_unverifiable_staleness');
+    expect(evt).toBeTruthy();
+    expect(evt.error?.message).toContain('no latestRoundData');
+    consoleSpy.mockRestore();
   });
 
   it('uses fetchPrice when staleness not required', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const client = {
       readContract: async (opts: any) => {
         if (opts.functionName === 'latestRoundData') {
@@ -46,9 +56,21 @@ describe('price freshness policy', () => {
     });
 
     expect(res).toBe(100_000n);
+    const evt = consoleSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l))
+      .find(
+        (p: any) =>
+          p.event === 'price_latestRoundData_unavailable_fallback_fetchPrice'
+      );
+    expect(evt).toBeTruthy();
+    expect(evt.error?.message).toContain('no latestRoundData');
+    consoleSpy.mockRestore();
   });
 
   it('rejects stale price when updatedAt too old', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const client = {
       readContract: async (opts: any) => {
         if (opts.functionName === 'latestRoundData') {
@@ -67,6 +89,11 @@ describe('price freshness policy', () => {
     });
 
     expect(res).toBeNull();
+    const evt = consoleSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l))[0];
+    expect(evt.event).toBe('price_stale');
+    consoleSpy.mockRestore();
   });
 });
-

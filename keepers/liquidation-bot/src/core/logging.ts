@@ -8,6 +8,11 @@ export function setLogContext(ctx: JsonRecord) {
   context = { ...context, ...ctx };
 }
 
+// Useful for tests to avoid cross-test leakage.
+export function clearLogContext() {
+  context = {};
+}
+
 function nowIso() {
   return new Date().toISOString();
 }

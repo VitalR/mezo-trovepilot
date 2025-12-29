@@ -5,6 +5,18 @@ import { LiquidationJob } from './jobs.js';
 import { log } from './logging.js';
 import { BotConfig } from '../config.js';
 
+type FeeMode = 'eip1559' | 'legacy' | 'unknown';
+type FeeSource = 'config' | 'estimateFeesPerGas' | 'getGasPrice' | 'unknown';
+type FeeInfo = {
+  mode: FeeMode;
+  source: FeeSource;
+  prioritySource?: FeeSource;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  gasPrice?: bigint;
+  known: boolean;
+};
+
 export function classifyError(err: unknown): {
   type: 'logic' | 'rate_limit' | 'nonce' | 'underpriced' | 'transient';
   message: string;
@@ -82,28 +94,60 @@ export async function executeLiquidationJob(params: {
   const bufferPct = config.gasBufferPct ?? 0;
   const applyBuffer = (g: bigint) => (g * BigInt(100 + bufferPct)) / 100n;
 
-  let maxFeePerGas = config.maxFeePerGas;
-  let maxPriorityFeePerGas = config.maxPriorityFeePerGas;
-  if (maxFeePerGas === undefined) {
-    try {
-      const fees = await publicClient.estimateFeesPerGas();
-      maxFeePerGas = fees.maxFeePerGas;
-      if (maxPriorityFeePerGas === undefined) {
-        maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
-      }
-    } catch {
-      const gasPrice = await publicClient.getGasPrice();
-      maxFeePerGas = gasPrice;
-      // leave priority as provided (may be undefined)
-    }
-  }
-  if (maxFeePerGas === undefined) {
-    maxFeePerGas = 0n;
-  }
-
   const emitJson = (event: string, data: Record<string, unknown>) => {
     log.jsonInfo(event, { component: 'executor', ...data });
   };
+
+  async function resolveFeeInfo(): Promise<FeeInfo> {
+    if (config.maxFeePerGas !== undefined) {
+      let priorityFee: bigint | undefined = config.maxPriorityFeePerGas;
+      let prioritySource: FeeSource | undefined;
+      if (priorityFee === undefined) {
+        try {
+          const fees = await publicClient.estimateFeesPerGas();
+          priorityFee = fees.maxPriorityFeePerGas;
+          prioritySource = 'estimateFeesPerGas';
+        } catch {
+          // leave undefined if not available
+        }
+      }
+      return {
+        mode: 'eip1559',
+        source: 'config',
+        maxFeePerGas: config.maxFeePerGas,
+        maxPriorityFeePerGas: priorityFee,
+        prioritySource,
+        known: true,
+      };
+    }
+
+    try {
+      const fees = await publicClient.estimateFeesPerGas();
+      return {
+        mode: 'eip1559',
+        source: 'estimateFeesPerGas',
+        maxFeePerGas: fees.maxFeePerGas,
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+        known: true,
+      };
+    } catch {
+      // fall through
+    }
+
+    try {
+      const gasPrice = await publicClient.getGasPrice();
+      return {
+        mode: 'legacy',
+        source: 'getGasPrice',
+        gasPrice,
+        known: true,
+      };
+    } catch {
+      return { mode: 'unknown', source: 'unknown', known: false };
+    }
+  }
+
+  let feeInfo = await resolveFeeInfo();
 
   type PlanResult =
     | {
@@ -112,11 +156,12 @@ export async function executeLiquidationJob(params: {
         gasEstimate: bigint;
         estimatedCost: bigint;
       }
-    | { ok: false; reason: 'GAS_CAP' | 'SPEND_CAP' };
+    | { ok: false; reason: 'GAS_CAP' | 'SPEND_CAP' | 'FEE_UNAVAILABLE' };
 
   async function planForCount(
     limitCount: number,
-    currentSpend: bigint
+    currentSpend: bigint,
+    fee: FeeInfo
   ): Promise<PlanResult> {
     let workingCountLocal = limitCount;
     let borrowers = originalBorrowers.slice(0, workingCountLocal);
@@ -148,10 +193,30 @@ export async function executeLiquidationJob(params: {
       }
     }
 
-    const estimatedCost = gasEstimate * (maxFeePerGas ?? 0n);
+    const feePerGas =
+      fee.mode === 'eip1559'
+        ? fee.maxFeePerGas
+        : fee.mode === 'legacy'
+        ? fee.gasPrice
+        : undefined;
+    if (config.maxNativeSpentPerRun !== undefined && !fee.known) {
+      emitJson('job_skip', {
+        reason: 'FEE_UNAVAILABLE',
+        borrowersTotal: originalBorrowers.length,
+        fee: {
+          mode: fee.mode,
+          source: fee.source,
+          known: fee.known,
+        },
+      });
+      return { ok: false, reason: 'FEE_UNAVAILABLE' };
+    }
+
+    const estimatedCost =
+      feePerGas !== undefined ? gasEstimate * feePerGas : 0n;
     if (
       config.maxNativeSpentPerRun !== undefined &&
-      maxFeePerGas !== undefined &&
+      feePerGas !== undefined &&
       currentSpend + estimatedCost > config.maxNativeSpentPerRun
     ) {
       emitJson('job_skip', {
@@ -159,6 +224,14 @@ export async function executeLiquidationJob(params: {
         projectedSpend: (currentSpend + estimatedCost).toString(),
         cap: config.maxNativeSpentPerRun.toString(),
         borrowersTotal: originalBorrowers.length,
+        fee: {
+          mode: fee.mode,
+          source: fee.source,
+          known: fee.known,
+          maxFeePerGas: fee.maxFeePerGas?.toString(),
+          maxPriorityFeePerGas: fee.maxPriorityFeePerGas?.toString(),
+          gasPrice: fee.gasPrice?.toString(),
+        },
       });
       return { ok: false, reason: 'SPEND_CAP' };
     }
@@ -177,6 +250,15 @@ export async function executeLiquidationJob(params: {
         config.maxNativeSpentPerRun !== undefined
           ? config.maxNativeSpentPerRun.toString()
           : undefined,
+      fee: {
+        mode: fee.mode,
+        source: fee.source,
+        known: fee.known,
+        maxFeePerGas: fee.maxFeePerGas?.toString(),
+        maxPriorityFeePerGas: fee.maxPriorityFeePerGas?.toString(),
+        gasPrice: fee.gasPrice?.toString(),
+        prioritySource: fee.prioritySource,
+      },
     });
 
     return {
@@ -187,7 +269,11 @@ export async function executeLiquidationJob(params: {
     };
   }
 
-  const initialPlan = await planForCount(workingCount, spendTracker.spent);
+  const initialPlan = await planForCount(
+    workingCount,
+    spendTracker.spent,
+    feeInfo
+  );
   if (!initialPlan.ok) {
     return { processedBorrowers: [], leftoverBorrowers: originalBorrowers };
   }
@@ -210,7 +296,12 @@ export async function executeLiquidationJob(params: {
           replanPerformed: attempt === 1,
         });
         if (attempt === 1) {
-          const replan = await planForCount(workingCount, spendTracker.spent);
+          feeInfo = await resolveFeeInfo();
+          const replan = await planForCount(
+            workingCount,
+            spendTracker.spent,
+            feeInfo
+          );
           if (!replan.ok) {
             return {
               processedBorrowers: [],
@@ -225,34 +316,47 @@ export async function executeLiquidationJob(params: {
 
       const borrowersForTx = originalBorrowers.slice(0, workingCount);
 
-      const hash = await walletClient.writeContract({
+      const txArgs: Record<string, unknown> = {
         address: liquidationEngine,
         abi: liquidationEngineAbi,
         functionName: 'liquidateRange',
         args: [borrowersForTx, job.fallbackOnFail],
         account: (walletAccount ?? null) as Account | Address | null,
-        maxFeePerGas,
-        maxPriorityFeePerGas,
         gas: gasEstimate,
-        chain: (walletClient as any).chain ?? null,
-      });
+      };
+
+      if (feeInfo.mode === 'eip1559') {
+        if (feeInfo.maxFeePerGas !== undefined)
+          txArgs.maxFeePerGas = feeInfo.maxFeePerGas;
+        if (feeInfo.maxPriorityFeePerGas !== undefined)
+          txArgs.maxPriorityFeePerGas = feeInfo.maxPriorityFeePerGas;
+      } else if (feeInfo.mode === 'legacy') {
+        if (feeInfo.gasPrice !== undefined) txArgs.gasPrice = feeInfo.gasPrice;
+      }
+
+      const hash = await walletClient.writeContract(txArgs as any);
 
       emitJson('tx_sent', {
         hash,
         workingCount,
         gasLimit: gasEstimate.toString(),
-        maxFeePerGas: maxFeePerGas?.toString(),
-        maxPriorityFeePerGas: maxPriorityFeePerGas?.toString(),
+        fee: {
+          mode: feeInfo.mode,
+          source: feeInfo.source,
+          known: feeInfo.known,
+          maxFeePerGas: feeInfo.maxFeePerGas?.toString(),
+          maxPriorityFeePerGas: feeInfo.maxPriorityFeePerGas?.toString(),
+          gasPrice: feeInfo.gasPrice?.toString(),
+          prioritySource: feeInfo.prioritySource,
+        },
       });
 
-      log.info(
-        `Tx sent: ${hash} (gas=${gasEstimate.toString()} maxFeePerGas=${maxFeePerGas.toString()} fallback=${
-          job.fallbackOnFail
-        } borrowers=${borrowersForTx.length})`
-      );
-
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      const actualGasPrice = (receipt as any).effectiveGasPrice ?? maxFeePerGas;
+      const actualGasPrice =
+        (receipt as any).effectiveGasPrice ??
+        feeInfo.maxFeePerGas ??
+        feeInfo.gasPrice ??
+        0n;
       const actualGasUsed = receipt.gasUsed ?? gasEstimate;
       const actualCost = actualGasPrice * actualGasUsed;
 
@@ -263,13 +367,17 @@ export async function executeLiquidationJob(params: {
         effectiveGasPrice: actualGasPrice?.toString(),
         projectedCost: estimatedCost.toString(),
         actualCost: actualCost.toString(),
+        fee: {
+          mode: feeInfo.mode,
+          source: feeInfo.source,
+          known: feeInfo.known,
+          submittedMaxFeePerGas: feeInfo.maxFeePerGas?.toString(),
+          submittedGasPrice: feeInfo.gasPrice?.toString(),
+          submittedMaxPriorityFeePerGas:
+            feeInfo.maxPriorityFeePerGas?.toString(),
+          prioritySource: feeInfo.prioritySource,
+        },
       });
-
-      log.info(
-        `Tx confirmed status=${
-          receipt.status
-        } gasUsed=${actualGasUsed.toString()} projectedCost=${estimatedCost.toString()} actualCost=${actualCost.toString()}`
-      );
 
       spendTracker.spent += actualCost;
       return {

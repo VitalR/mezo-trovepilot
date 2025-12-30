@@ -409,6 +409,207 @@ describe('executor gas handling and splitting', () => {
     ]);
   });
 
+  it('emits retry_scheduled before second send with reason/message and correct backoff', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));
+    publicClient.estimateContractGas.mockResolvedValue(10n);
+    publicClient.getGasPrice.mockResolvedValue(1n);
+    walletClient.writeContract
+      .mockRejectedValueOnce(new Error('network issue'))
+      .mockResolvedValueOnce('0xtxhash');
+    publicClient.waitForTransactionReceipt.mockResolvedValue({
+      status: 'success',
+      gasUsed: 10n,
+      effectiveGasPrice: 1n,
+    });
+
+    await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 1,
+        maxGasPerJob: 0n,
+        maxNativeSpentPerRun: 1_000n,
+        gasBufferPct: 0,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    const logs = consoleLogSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l));
+
+    const txErrorIdx = logs.findIndex((p: any) => p.event === 'tx_error');
+    const retryIdx = logs.findIndex((p: any) => p.event === 'retry_scheduled');
+    const txSentIdxs = logs
+      .map((p: any, i: number) => ({ p, i }))
+      .filter(({ p }) => p.event === 'tx_sent')
+      .map(({ i }) => i);
+
+    expect(txSentIdxs.length).toBe(1);
+    const txSentIdx = txSentIdxs[0];
+
+    expect(txErrorIdx).toBeLessThan(retryIdx);
+    expect(retryIdx).toBeLessThan(txSentIdx);
+
+    const retry = logs[retryIdx];
+    expect(retry.attempt).toBe(1);
+    expect(retry.nextBackoffMs).toBe(500);
+    expect(retry.backoffMs).toBe(500); // compatibility field, kept equal
+    expect(retry.reason).toBe('transient');
+    expect(retry.message).toContain('network issue');
+
+    const txError = logs[txErrorIdx];
+    expect(txError.nextBackoffMs).toBe(500);
+
+    consoleLogSpy.mockRestore();
+  });
+
+  it('falls back to zero priority fee when config maxFeePerGas set and priority unavailable', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no priority'));
+    publicClient.estimateContractGas.mockResolvedValue(10n);
+    walletClient.writeContract.mockResolvedValue('0xtxhash');
+    publicClient.waitForTransactionReceipt.mockResolvedValue({
+      status: 'success',
+      gasUsed: 10n,
+      effectiveGasPrice: 5n,
+    });
+
+    await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 0,
+        maxGasPerJob: 0n,
+        maxNativeSpentPerRun: undefined,
+        gasBufferPct: 0,
+        maxFeePerGas: 5n,
+        maxPriorityFeePerGas: undefined,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    const txArgs = walletClient.writeContract.mock.calls[0][0];
+    expect(txArgs.maxFeePerGas).toBe(5n);
+    expect(txArgs.maxPriorityFeePerGas).toBe(0n);
+
+    const logs = consoleLogSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l));
+    const plan = logs.find((p: any) => p.event === 'job_plan');
+    expect(plan.fee.mode).toBe('eip1559');
+    expect(plan.fee.maxPriorityFeePerGas).toBe('0');
+    expect(plan.fee.priorityKnown).toBe(false);
+    const txSent = logs.find((p: any) => p.event === 'tx_sent');
+    expect(txSent.fee.maxPriorityFeePerGas).toBe('0');
+    expect(txSent.fee.priorityKnown).toBe(false);
+
+    consoleLogSpy.mockRestore();
+  });
+
+  it('submits zero priority when estimateFeesPerGas returns undefined priority with config override', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    publicClient.estimateFeesPerGas.mockResolvedValue({
+      maxFeePerGas: 5n,
+      maxPriorityFeePerGas: undefined,
+    } as any);
+    publicClient.estimateContractGas.mockResolvedValue(10n);
+    walletClient.writeContract.mockResolvedValue('0xtxhash');
+    publicClient.waitForTransactionReceipt.mockResolvedValue({
+      status: 'success',
+      gasUsed: 10n,
+      effectiveGasPrice: 5n,
+    });
+
+    await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 0,
+        maxGasPerJob: 0n,
+        maxNativeSpentPerRun: undefined,
+        gasBufferPct: 0,
+        maxFeePerGas: 5n,
+        maxPriorityFeePerGas: undefined,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    const txArgs = walletClient.writeContract.mock.calls[0][0];
+    expect(txArgs.maxFeePerGas).toBe(5n);
+    expect(txArgs.maxPriorityFeePerGas).toBe(0n);
+
+    const logs = consoleLogSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l));
+    const plan = logs.find((p: any) => p.event === 'job_plan');
+    expect(plan.fee.maxPriorityFeePerGas).toBe('0');
+    expect(plan.fee.priorityKnown).toBe(false);
+    expect(plan.fee.prioritySource).toBe('estimateFeesPerGas');
+    consoleLogSpy.mockRestore();
+  });
+
+  it('falls back to zero priority when estimateFeesPerGas returns undefined priority in auto mode', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    publicClient.estimateFeesPerGas.mockResolvedValue({
+      maxFeePerGas: 6n,
+      maxPriorityFeePerGas: undefined,
+    } as any);
+    publicClient.estimateContractGas.mockResolvedValue(10n);
+    walletClient.writeContract.mockResolvedValue('0xtxhash');
+    publicClient.waitForTransactionReceipt.mockResolvedValue({
+      status: 'success',
+      gasUsed: 10n,
+      effectiveGasPrice: 6n,
+    });
+
+    await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 0,
+        maxGasPerJob: 0n,
+        maxNativeSpentPerRun: undefined,
+        gasBufferPct: 0,
+      },
+      spendTracker: { spent: 0n },
+    });
+
+    const txArgs = walletClient.writeContract.mock.calls[0][0];
+    expect(txArgs.maxPriorityFeePerGas).toBe(0n);
+
+    const logs = consoleLogSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l));
+    const plan = logs.find((p: any) => p.event === 'job_plan');
+    expect(plan.fee.maxPriorityFeePerGas).toBe('0');
+    expect(plan.fee.priorityKnown).toBe(false);
+    expect(plan.fee.prioritySource).toBe('estimateFeesPerGas');
+
+    consoleLogSpy.mockRestore();
+  });
+
   it('skips when projected spend exceeds cap without dropping borrowers silently', async () => {
     const { publicClient, walletClient } = makeClients();
     publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));
@@ -535,7 +736,7 @@ describe('executor gas handling and splitting', () => {
     expect(planConfig).toBeTruthy();
     expect(planConfig.fee.mode).toBe('eip1559');
     expect(planConfig.fee.maxFeePerGas).toBe('5');
-    expect(planConfig.fee.maxPriorityFeePerGas).toBeUndefined();
+    expect(planConfig.fee.maxPriorityFeePerGas).toBe('0');
 
     consoleLogSpy.mockClear();
     publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));

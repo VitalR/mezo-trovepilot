@@ -79,6 +79,22 @@ export const log = {
   jsonError: (event: string, fields?: JsonRecord) =>
     writeJson('error', event, fields ?? {}),
 
+  jsonInfoWithError: (event: string, err: unknown, fields?: JsonRecord) =>
+    writeJson('info', event, {
+      ...(fields ?? {}),
+      error: normalizeError(err),
+    }),
+  jsonWarnWithError: (event: string, err: unknown, fields?: JsonRecord) =>
+    writeJson('warn', event, {
+      ...(fields ?? {}),
+      error: normalizeError(err),
+    }),
+  jsonErrorWithError: (event: string, err: unknown, fields?: JsonRecord) =>
+    writeJson('error', event, {
+      ...(fields ?? {}),
+      error: normalizeError(err),
+    }),
+
   exception: (event: string, err: unknown, fields?: JsonRecord) =>
     writeJson('error', event, {
       ...(fields ?? {}),

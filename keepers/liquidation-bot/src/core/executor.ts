@@ -5,17 +5,29 @@ import { LiquidationJob } from './jobs.js';
 import { log } from './logging.js';
 import { BotConfig } from '../config.js';
 
-type FeeMode = 'eip1559' | 'legacy' | 'unknown';
-type FeeSource = 'config' | 'estimateFeesPerGas' | 'getGasPrice' | 'unknown';
-type FeeInfo = {
-  mode: FeeMode;
-  source: FeeSource;
-  prioritySource?: FeeSource;
-  maxFeePerGas?: bigint;
-  maxPriorityFeePerGas?: bigint;
-  gasPrice?: bigint;
-  known: boolean;
-};
+type FeeInfo =
+  | {
+      mode: 'eip1559';
+      source: 'config' | 'estimateFeesPerGas';
+      known: true;
+      maxFeePerGas?: bigint;
+      // Always submitted (falls back to 0n when not sourceable).
+      maxPriorityFeePerGas: bigint;
+      // Always present for EIP-1559 to make log schema unambiguous.
+      prioritySource: 'config' | 'estimateFeesPerGas';
+      priorityKnown: boolean;
+    }
+  | {
+      mode: 'legacy';
+      source: 'getGasPrice';
+      known: true;
+      gasPrice: bigint;
+    }
+  | {
+      mode: 'unknown';
+      source: 'unknown';
+      known: false;
+    };
 
 export function classifyError(err: unknown): {
   type: 'logic' | 'rate_limit' | 'nonce' | 'underpriced' | 'transient';
@@ -98,17 +110,71 @@ export async function executeLiquidationJob(params: {
     log.jsonInfo(event, { component: 'executor', ...data });
   };
 
+  const computeBackoffMs = (attemptNumber: number) =>
+    attemptNumber > 0 ? 500 * 2 ** (attemptNumber - 1) : 0;
+
+  const buildFeeFields = (fee: FeeInfo) => {
+    switch (fee.mode) {
+      case 'eip1559':
+        return {
+          mode: 'eip1559',
+          source: fee.source,
+          known: fee.known,
+          maxFeePerGas: fee.maxFeePerGas?.toString(),
+          maxPriorityFeePerGas: fee.maxPriorityFeePerGas.toString(),
+          gasPrice: undefined,
+          prioritySource: fee.prioritySource,
+          priorityKnown: fee.priorityKnown,
+        };
+      case 'legacy':
+        return {
+          mode: 'legacy',
+          source: fee.source,
+          known: fee.known,
+          maxFeePerGas: undefined,
+          maxPriorityFeePerGas: undefined,
+          gasPrice: fee.gasPrice.toString(),
+        };
+      case 'unknown':
+        return {
+          mode: 'unknown',
+          source: fee.source,
+          known: fee.known,
+          maxFeePerGas: undefined,
+          maxPriorityFeePerGas: undefined,
+          gasPrice: undefined,
+        };
+      default: {
+        const _exhaustive: never = fee;
+        throw new Error('Unhandled fee mode in buildFeeFields()');
+      }
+    }
+  };
+
   async function resolveFeeInfo(): Promise<FeeInfo> {
     if (config.maxFeePerGas !== undefined) {
-      let priorityFee: bigint | undefined = config.maxPriorityFeePerGas;
-      let prioritySource: FeeSource | undefined;
-      if (priorityFee === undefined) {
+      let priorityFee: bigint = config.maxPriorityFeePerGas ?? 0n;
+      let prioritySource: 'config' | 'estimateFeesPerGas' =
+        config.maxPriorityFeePerGas !== undefined
+          ? 'config'
+          : 'estimateFeesPerGas';
+      let priorityKnown: boolean = config.maxPriorityFeePerGas !== undefined;
+
+      // Priority fee is either explicitly configured (source=config), or we attempt
+      // estimateFeesPerGas (source=estimateFeesPerGas) even if it throws/returns undefined.
+      if (config.maxPriorityFeePerGas === undefined) {
         try {
           const fees = await publicClient.estimateFeesPerGas();
-          priorityFee = fees.maxPriorityFeePerGas;
-          prioritySource = 'estimateFeesPerGas';
+          if (fees.maxPriorityFeePerGas === undefined) {
+            priorityKnown = false;
+            priorityFee = 0n;
+          } else {
+            priorityKnown = true;
+            priorityFee = fees.maxPriorityFeePerGas;
+          }
         } catch {
-          // leave undefined if not available
+          priorityKnown = false;
+          priorityFee = 0n; // fallback to explicit zero priority for type-2 tx safety
         }
       }
       return {
@@ -117,17 +183,22 @@ export async function executeLiquidationJob(params: {
         maxFeePerGas: config.maxFeePerGas,
         maxPriorityFeePerGas: priorityFee,
         prioritySource,
+        priorityKnown,
         known: true,
       };
     }
 
     try {
       const fees = await publicClient.estimateFeesPerGas();
+      const priorityFee = fees.maxPriorityFeePerGas ?? 0n;
+      const priorityKnown = fees.maxPriorityFeePerGas !== undefined;
       return {
         mode: 'eip1559',
         source: 'estimateFeesPerGas',
         maxFeePerGas: fees.maxFeePerGas,
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+        maxPriorityFeePerGas: priorityFee,
+        prioritySource: 'estimateFeesPerGas',
+        priorityKnown,
         known: true,
       };
     } catch {
@@ -154,7 +225,7 @@ export async function executeLiquidationJob(params: {
         ok: true;
         workingCount: number;
         gasEstimate: bigint;
-        estimatedCost: bigint;
+        estimatedCost?: bigint;
       }
     | { ok: false; reason: 'GAS_CAP' | 'SPEND_CAP' | 'FEE_UNAVAILABLE' };
 
@@ -213,10 +284,10 @@ export async function executeLiquidationJob(params: {
     }
 
     const estimatedCost =
-      feePerGas !== undefined ? gasEstimate * feePerGas : 0n;
+      feePerGas !== undefined ? gasEstimate * feePerGas : undefined;
     if (
       config.maxNativeSpentPerRun !== undefined &&
-      feePerGas !== undefined &&
+      estimatedCost !== undefined &&
       currentSpend + estimatedCost > config.maxNativeSpentPerRun
     ) {
       emitJson('job_skip', {
@@ -224,14 +295,7 @@ export async function executeLiquidationJob(params: {
         projectedSpend: (currentSpend + estimatedCost).toString(),
         cap: config.maxNativeSpentPerRun.toString(),
         borrowersTotal: originalBorrowers.length,
-        fee: {
-          mode: fee.mode,
-          source: fee.source,
-          known: fee.known,
-          maxFeePerGas: fee.maxFeePerGas?.toString(),
-          maxPriorityFeePerGas: fee.maxPriorityFeePerGas?.toString(),
-          gasPrice: fee.gasPrice?.toString(),
-        },
+        fee: buildFeeFields(fee),
       });
       return { ok: false, reason: 'SPEND_CAP' };
     }
@@ -241,7 +305,8 @@ export async function executeLiquidationJob(params: {
       workingCount: workingCountLocal,
       gasEstimateRaw: rawGas.toString(),
       gasBuffered: gasEstimate.toString(),
-      estimatedCost: estimatedCost.toString(),
+      estimatedCost: estimatedCost?.toString(),
+      estimatedCostKnown: estimatedCost !== undefined,
       maxGasPerJob:
         config.maxGasPerJob !== undefined
           ? config.maxGasPerJob.toString()
@@ -250,15 +315,7 @@ export async function executeLiquidationJob(params: {
         config.maxNativeSpentPerRun !== undefined
           ? config.maxNativeSpentPerRun.toString()
           : undefined,
-      fee: {
-        mode: fee.mode,
-        source: fee.source,
-        known: fee.known,
-        maxFeePerGas: fee.maxFeePerGas?.toString(),
-        maxPriorityFeePerGas: fee.maxPriorityFeePerGas?.toString(),
-        gasPrice: fee.gasPrice?.toString(),
-        prioritySource: fee.prioritySource,
-      },
+      fee: buildFeeFields(fee),
     });
 
     return {
@@ -284,17 +341,23 @@ export async function executeLiquidationJob(params: {
 
   let attempt = 0;
   let lastErr: unknown;
+  let lastClassified:
+    | { type: ReturnType<typeof classifyError>['type']; message: string }
+    | undefined;
   while (attempt <= config.maxTxRetries) {
     try {
       if (attempt > 0) {
-        const backoffMs = 500 * 2 ** (attempt - 1);
-        await new Promise((r) => setTimeout(r, backoffMs));
-        emitJson('retry', {
+        const nextBackoffMs = computeBackoffMs(attempt);
+        emitJson('retry_scheduled', {
           attempt,
-          reason: 'transient',
-          backoffMs,
+          // TODO: remove backoffMs once downstream consumers migrate to nextBackoffMs (keeper v2.0+)
+          backoffMs: nextBackoffMs,
+          nextBackoffMs,
           replanPerformed: attempt === 1,
+          reason: lastClassified?.type,
+          message: lastClassified?.message,
         });
+        await new Promise((r) => setTimeout(r, nextBackoffMs));
         if (attempt === 1) {
           feeInfo = await resolveFeeInfo();
           const replan = await planForCount(
@@ -326,12 +389,12 @@ export async function executeLiquidationJob(params: {
       };
 
       if (feeInfo.mode === 'eip1559') {
-        if (feeInfo.maxFeePerGas !== undefined)
+        if (feeInfo.maxFeePerGas !== undefined) {
           txArgs.maxFeePerGas = feeInfo.maxFeePerGas;
-        if (feeInfo.maxPriorityFeePerGas !== undefined)
-          txArgs.maxPriorityFeePerGas = feeInfo.maxPriorityFeePerGas;
+        }
+        txArgs.maxPriorityFeePerGas = feeInfo.maxPriorityFeePerGas;
       } else if (feeInfo.mode === 'legacy') {
-        if (feeInfo.gasPrice !== undefined) txArgs.gasPrice = feeInfo.gasPrice;
+        txArgs.gasPrice = feeInfo.gasPrice;
       }
 
       const hash = await walletClient.writeContract(txArgs as any);
@@ -340,23 +403,17 @@ export async function executeLiquidationJob(params: {
         hash,
         workingCount,
         gasLimit: gasEstimate.toString(),
-        fee: {
-          mode: feeInfo.mode,
-          source: feeInfo.source,
-          known: feeInfo.known,
-          maxFeePerGas: feeInfo.maxFeePerGas?.toString(),
-          maxPriorityFeePerGas: feeInfo.maxPriorityFeePerGas?.toString(),
-          gasPrice: feeInfo.gasPrice?.toString(),
-          prioritySource: feeInfo.prioritySource,
-        },
+        fee: buildFeeFields(feeInfo),
       });
 
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       const actualGasPrice =
         (receipt as any).effectiveGasPrice ??
-        feeInfo.maxFeePerGas ??
-        feeInfo.gasPrice ??
-        0n;
+        (feeInfo.mode === 'eip1559'
+          ? feeInfo.maxFeePerGas ?? 0n
+          : feeInfo.mode === 'legacy'
+          ? feeInfo.gasPrice
+          : 0n);
       const actualGasUsed = receipt.gasUsed ?? gasEstimate;
       const actualCost = actualGasPrice * actualGasUsed;
 
@@ -365,17 +422,27 @@ export async function executeLiquidationJob(params: {
         status: receipt.status,
         gasUsed: actualGasUsed.toString(),
         effectiveGasPrice: actualGasPrice?.toString(),
-        projectedCost: estimatedCost.toString(),
+        projectedCost: estimatedCost?.toString(),
+        projectedCostKnown: estimatedCost !== undefined,
         actualCost: actualCost.toString(),
         fee: {
           mode: feeInfo.mode,
           source: feeInfo.source,
           known: feeInfo.known,
-          submittedMaxFeePerGas: feeInfo.maxFeePerGas?.toString(),
-          submittedGasPrice: feeInfo.gasPrice?.toString(),
+          submittedMaxFeePerGas:
+            feeInfo.mode === 'eip1559'
+              ? feeInfo.maxFeePerGas?.toString()
+              : undefined,
+          submittedGasPrice:
+            feeInfo.mode === 'legacy' ? feeInfo.gasPrice.toString() : undefined,
           submittedMaxPriorityFeePerGas:
-            feeInfo.maxPriorityFeePerGas?.toString(),
-          prioritySource: feeInfo.prioritySource,
+            feeInfo.mode === 'eip1559'
+              ? feeInfo.maxPriorityFeePerGas.toString()
+              : undefined,
+          prioritySource:
+            feeInfo.mode === 'eip1559' ? feeInfo.prioritySource : undefined,
+          priorityKnown:
+            feeInfo.mode === 'eip1559' ? feeInfo.priorityKnown : undefined,
         },
       });
 
@@ -388,13 +455,17 @@ export async function executeLiquidationJob(params: {
       lastErr = err;
       const isLast = attempt === config.maxTxRetries;
       const classified = classifyError(err);
+      lastClassified = classified;
 
-      emitJson('retry', {
+      emitJson('tx_error', {
         attempt,
         reason: classified.type,
-        backoffMs: attempt > 0 ? 500 * 2 ** (attempt - 1) : 0,
         replanPerformed: attempt === 1,
         message: classified.message,
+        nextBackoffMs:
+          attempt < config.maxTxRetries
+            ? computeBackoffMs(attempt + 1)
+            : undefined,
       });
 
       if (classified.type === 'logic') {

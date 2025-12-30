@@ -29,6 +29,7 @@ describe('price freshness policy', () => {
       .map((l) => JSON.parse(l))
       .find((p: any) => p.event === 'price_unverifiable_staleness');
     expect(evt).toBeTruthy();
+    expect(evt.level).toBe('warn');
     expect(evt.error?.message).toContain('no latestRoundData');
     consoleSpy.mockRestore();
   });
@@ -65,6 +66,7 @@ describe('price freshness policy', () => {
           p.event === 'price_latestRoundData_unavailable_fallback_fetchPrice'
       );
     expect(evt).toBeTruthy();
+    expect(evt.level).toBe('info');
     expect(evt.error?.message).toContain('no latestRoundData');
     consoleSpy.mockRestore();
   });

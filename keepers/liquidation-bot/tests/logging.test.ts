@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearLogContext, log, setLogContext } from '../src/core/logging.js';
 
 describe('structured logging', () => {
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: any;
 
   afterEach(() => {
     if (consoleLogSpy) consoleLogSpy.mockRestore();
@@ -54,5 +54,23 @@ describe('structured logging', () => {
     expect(payload.foo).toBe('bar');
     expect(payload.error.message).toBe('boom');
     expect(payload.component).toBe('test');
+  });
+
+  it('emits info/warn with error payload without forcing level error', () => {
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const err = new Error('not critical');
+
+    log.jsonInfoWithError('non_critical', err, { foo: 'bar' });
+    log.jsonWarnWithError('maybe_issue', err, { foo: 'baz' });
+
+    const payloads = consoleLogSpy.mock.calls.map((c) =>
+      JSON.parse(c[0] as string)
+    );
+    expect(payloads[0].level).toBe('info');
+    expect(payloads[0].event).toBe('non_critical');
+    expect(payloads[0].error.message).toBe('not critical');
+    expect(payloads[1].level).toBe('warn');
+    expect(payloads[1].event).toBe('maybe_issue');
+    expect(payloads[1].error.message).toBe('not critical');
   });
 });

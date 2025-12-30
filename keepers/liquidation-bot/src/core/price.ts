@@ -28,13 +28,13 @@ async function readLatestRound(
     return { roundId, answer, updatedAt };
   } catch (err) {
     if (maxAgeSeconds > 0) {
-      log.exception('price_unverifiable_staleness', err, {
+      log.jsonWarnWithError('price_unverifiable_staleness', err, {
         component: 'price',
         reason: 'latestRoundData_unavailable',
       });
       return null;
     }
-    log.exception(
+    log.jsonInfoWithError(
       'price_latestRoundData_unavailable_fallback_fetchPrice',
       err,
       {
@@ -82,9 +82,6 @@ export async function getCurrentPrice(params: {
       return null;
     }
   } else {
-    log.warn(
-      'Price staleness required but latestRoundData unavailable; skipping run'
-    );
     return null;
   }
 

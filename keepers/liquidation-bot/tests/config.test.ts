@@ -33,6 +33,18 @@ describe('config parsing semantics', () => {
     expect(cfg.maxGasPerJob).toBeUndefined();
   });
 
+  it('blank optional caps are treated as disabled/auto', () => {
+    process.env.MAX_FEE_PER_GAS = '';
+    process.env.MAX_PRIORITY_FEE_PER_GAS = '';
+    process.env.MAX_NATIVE_SPENT_PER_RUN = '';
+    process.env.MAX_GAS_PER_JOB = '';
+    const cfg = loadConfig();
+    expect(cfg.maxFeePerGas).toBeUndefined();
+    expect(cfg.maxPriorityFeePerGas).toBeUndefined();
+    expect(cfg.maxNativeSpentPerRun).toBeUndefined();
+    expect(cfg.maxGasPerJob).toBeUndefined();
+  });
+
   it('parses optional caps when provided', () => {
     process.env.MAX_FEE_PER_GAS = '10';
     process.env.MAX_PRIORITY_FEE_PER_GAS = '2';

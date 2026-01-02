@@ -7,7 +7,11 @@
     "build": "tsc",
     "start": "ts-node src/index.ts",
     "lint": "echo \"TODO: add lint\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "testnet:open": "ts-node scripts/testnet/01_open_trove_near_mcr.ts",
+    "testnet:poll": "ts-node scripts/testnet/02_poll_liquidatable.ts",
+    "testnet:run-once": "ts-node scripts/testnet/03_run_keeper_once.ts",
+    "testnet:verify": "ts-node scripts/testnet/04_verify_post_state.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

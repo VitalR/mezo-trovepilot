@@ -16,6 +16,9 @@ function makeMockClients(gas: bigint, shouldFail: boolean = false) {
       async getGasPrice() {
         return 1n;
       },
+      async getBalance() {
+        return 1_000_000_000_000_000_000n; // plenty
+      },
       async waitForTransactionReceipt() {
         return { status: 'success', gasUsed: gas };
       },
@@ -68,6 +71,9 @@ describe('executor gas cap', () => {
         },
         async getGasPrice() {
           return 1n;
+        },
+        async getBalance() {
+          return 1_000_000_000_000_000_000n; // plenty
         },
         async waitForTransactionReceipt() {
           return { status: 'success', gasUsed: 80_000n };
@@ -122,6 +128,9 @@ describe('executor gas cap', () => {
       },
       async getGasPrice() {
         return 1n;
+      },
+      async getBalance() {
+        return 1_000_000_000_000_000_000n; // plenty
       },
       async waitForTransactionReceipt() {
         return { status: 'success', gasUsed: 60_000n };

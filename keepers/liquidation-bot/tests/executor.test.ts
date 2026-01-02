@@ -11,12 +11,14 @@ function makeClients() {
   const waitForTransactionReceipt = vi.fn();
   const getGasPrice = vi.fn();
   const estimateFeesPerGas = vi.fn();
+  const getBalance = vi.fn();
 
   const publicClient = {
     estimateContractGas,
     waitForTransactionReceipt,
     getGasPrice,
     estimateFeesPerGas,
+    getBalance,
   };
 
   const walletClient = {
@@ -28,6 +30,44 @@ function makeClients() {
 }
 
 describe('executor gas handling and splitting', () => {
+  it('skips with INSUFFICIENT_BALANCE when balance is below projected cost', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));
+    publicClient.getGasPrice.mockResolvedValue(10n);
+    publicClient.estimateContractGas.mockResolvedValue(100n);
+    publicClient.getBalance.mockResolvedValue(500n); // too low
+
+    const res = await executeLiquidationJob({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      liquidationEngine: ZERO,
+      job: { borrowers: [addr(1)], fallbackOnFail: true },
+      dryRun: false,
+      config: {
+        maxTxRetries: 0,
+        minKeeperBalanceWei: undefined,
+        maxNativeSpentPerRun: undefined,
+        maxGasPerJob: undefined,
+        gasBufferPct: 0,
+      },
+    });
+
+    expect(res.processedBorrowers).toEqual([]);
+    expect(res.leftoverBorrowers).toEqual([addr(1)]);
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
+
+    const lines = consoleLogSpy.mock.calls
+      .map((c) => String(c[0] ?? ''))
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l));
+    const skip = lines.find((e) => e.event === 'job_skip');
+    expect(skip?.reason).toBe('INSUFFICIENT_BALANCE');
+
+    consoleLogSpy.mockRestore();
+  });
+
   it('applies gas buffer, shrinks under cap, and tracks actual cost', async () => {
     const { publicClient, walletClient } = makeClients();
     publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));

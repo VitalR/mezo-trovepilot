@@ -62,6 +62,7 @@ export async function executeLiquidationJob(params: {
   config: Pick<
     BotConfig,
     | 'maxTxRetries'
+    | 'minKeeperBalanceWei'
     | 'maxFeePerGas'
     | 'maxPriorityFeePerGas'
     | 'maxNativeSpentPerRun'
@@ -227,7 +228,14 @@ export async function executeLiquidationJob(params: {
         gasEstimate: bigint;
         estimatedCost?: bigint;
       }
-    | { ok: false; reason: 'GAS_CAP' | 'SPEND_CAP' | 'FEE_UNAVAILABLE' };
+    | {
+        ok: false;
+        reason:
+          | 'GAS_CAP'
+          | 'SPEND_CAP'
+          | 'FEE_UNAVAILABLE'
+          | 'INSUFFICIENT_BALANCE';
+      };
 
   async function planForCount(
     limitCount: number,
@@ -298,6 +306,34 @@ export async function executeLiquidationJob(params: {
         fee: buildFeeFields(fee),
       });
       return { ok: false, reason: 'SPEND_CAP' };
+    }
+
+    // Keeper balance preflight (skip-only guard).
+    // If projected cost is known, ensure balance can cover it.
+    // If MIN_KEEPER_BALANCE_WEI is set, enforce that minimum regardless of caps.
+    if (
+      (estimatedCost !== undefined ||
+        config.minKeeperBalanceWei !== undefined) &&
+      fromAddress
+    ) {
+      const balanceWei = await publicClient.getBalance({
+        address: fromAddress,
+      });
+      const minReq = config.minKeeperBalanceWei ?? 0n;
+      const requiredForTx = estimatedCost ?? 0n;
+      const required = requiredForTx > minReq ? requiredForTx : minReq;
+      if (balanceWei < required) {
+        emitJson('job_skip', {
+          reason: 'INSUFFICIENT_BALANCE',
+          balanceWei: balanceWei.toString(),
+          requiredWei: required.toString(),
+          requiredForTxWei: estimatedCost?.toString(),
+          minKeeperBalanceWei: config.minKeeperBalanceWei?.toString(),
+          borrowersTotal: originalBorrowers.length,
+          fee: buildFeeFields(fee),
+        });
+        return { ok: false, reason: 'INSUFFICIENT_BALANCE' };
+      }
     }
 
     emitJson('job_plan', {

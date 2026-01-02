@@ -20,6 +20,7 @@ export interface BotConfig {
   privateKey: `0x${string}`;
   unlockedRpcUrl?: string;
   keeperAddress?: Address;
+  minKeeperBalanceWei?: bigint;
   troveManager: Address;
   sortedTroves: Address;
   liquidationEngine: Address;
@@ -60,6 +61,7 @@ export function loadConfig(): BotConfig {
     privateKey: (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`,
     unlockedRpcUrl: process.env.UNLOCKED_RPC_URL,
     keeperAddress: process.env.KEEPER_ADDRESS as Address | undefined,
+    minKeeperBalanceWei: parseOptionalBigIntEnv('MIN_KEEPER_BALANCE_WEI'),
     troveManager: (process.env.TROVE_MANAGER_ADDRESS ??
       defaults.troveManager ??
       requireEnv('TROVE_MANAGER_ADDRESS')) as Address,
@@ -177,6 +179,7 @@ function validateConfig(cfg: BotConfig) {
 
   if (cfg.maxTxRetries < 0) throw new Error('MAX_TX_RETRIES must be >= 0');
   const gasBounds = [
+    cfg.minKeeperBalanceWei,
     cfg.maxFeePerGas,
     cfg.maxPriorityFeePerGas,
     cfg.maxNativeSpentPerRun,

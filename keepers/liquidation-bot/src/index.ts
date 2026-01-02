@@ -80,6 +80,7 @@ async function main() {
       dryRun: config.dryRun,
       config: {
         maxTxRetries: config.maxTxRetries,
+        minKeeperBalanceWei: config.minKeeperBalanceWei,
         maxFeePerGas: config.maxFeePerGas,
         maxPriorityFeePerGas: config.maxPriorityFeePerGas,
         maxNativeSpentPerRun: config.maxNativeSpentPerRun,

@@ -19,8 +19,8 @@ import {
   requireConfirm,
   scriptPaths,
   readJsonFile,
-  writeJsonFile,
   ensureStateDir,
+  writeStateWithHistory,
 } from './_lib.js';
 import { TestnetStateV1 } from './_types.js';
 
@@ -83,7 +83,7 @@ async function main() {
 
   const { publicClient, walletClient, account } = buildClients(config);
   await assertTestnet(publicClient, book);
-  initScriptLogContext({
+  const runId = initScriptLogContext({
     script: '03_run_keeper_once',
     keeper: account,
     network: process.env.NETWORK ?? book.network,
@@ -231,12 +231,17 @@ async function main() {
       },
     };
     const { latest: latestPath } = scriptPaths();
-    writeJsonFile(latestPath, next);
-    writeJsonFile(stateFile, next);
+    const snapshot = writeStateWithHistory({
+      stateFile,
+      latestFile: latestPath,
+      snapshotPrefix: `run_once_${runId}`,
+      data: next,
+    });
     log.jsonInfo('testnet_state_updated', {
       component: 'testnet',
       stateFile,
       latest: latestPath,
+      snapshot,
       txHash,
     });
     return;
@@ -364,12 +369,17 @@ async function main() {
   };
 
   const { latest: latestPath } = scriptPaths();
-  writeJsonFile(latestPath, next);
-  writeJsonFile(stateFile, next);
+  const snapshot = writeStateWithHistory({
+    stateFile,
+    latestFile: latestPath,
+    snapshotPrefix: `run_once_${runId}`,
+    data: next,
+  });
   log.jsonInfo('testnet_state_updated', {
     component: 'testnet',
     stateFile,
     latest: latestPath,
+    snapshot,
     txHash,
   });
 }

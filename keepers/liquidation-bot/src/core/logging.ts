@@ -61,7 +61,9 @@ function writeJson(level: Level, event: string, fields: JsonRecord = {}) {
     ...fields,
   };
   // Ensure it is a single JSON line.
-  console.log(JSON.stringify(payload));
+  console.log(
+    JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+  );
 }
 
 export const log = {

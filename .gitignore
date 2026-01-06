@@ -56,3 +56,7 @@ draft
 notes.txt
 deployments/dev/
 deployments/local/
+
+# Keeper testnet script state (local runtime artifacts)
+# Keep the directory structure + example files in git, ignore runtime state.
+keepers/liquidation-bot/scripts/testnet/.state/*

@@ -73,13 +73,20 @@ export function scriptPaths() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const stateDir = path.join(here, '.state');
   const latest = path.join(stateDir, 'latest.json');
-  return { here, stateDir, latest };
+  const runsDir = path.join(stateDir, 'runs');
+  return { here, stateDir, runsDir, latest };
 }
 
 export function ensureStateDir() {
   const { stateDir } = scriptPaths();
   fs.mkdirSync(stateDir, { recursive: true });
   return stateDir;
+}
+
+export function ensureRunsDir() {
+  const { runsDir } = scriptPaths();
+  fs.mkdirSync(runsDir, { recursive: true });
+  return runsDir;
 }
 
 export function readJsonFile<T>(filePath: string): T {
@@ -93,6 +100,32 @@ export function writeJsonFile(filePath: string, data: unknown) {
   const tmp = `${filePath}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, filePath);
+}
+
+/**
+ * Persist state in two forms:
+ * - `latest.json` (always overwritten)
+ * - an append-only snapshot under `.state/runs/` (never overwritten)
+ *
+ * Optionally also writes to `stateFile` if it is not `latest.json`.
+ */
+export function writeStateWithHistory(params: {
+  stateFile: string;
+  latestFile: string;
+  snapshotPrefix: string;
+  data: unknown;
+}) {
+  const { stateFile, latestFile, snapshotPrefix, data } = params;
+  writeJsonFile(latestFile, data);
+  if (stateFile !== latestFile) {
+    writeJsonFile(stateFile, data);
+  }
+  const dir = ensureRunsDir();
+  const ts = Date.now();
+  const safePrefix = snapshotPrefix.replace(/[^a-zA-Z0-9_.-]+/g, '_');
+  const snap = path.join(dir, `${safePrefix}_${ts}.json`);
+  writeJsonFile(snap, data);
+  return snap;
 }
 
 export function requireAddress(name: string, v: unknown): Address {
@@ -111,6 +144,9 @@ export type AddressBook = {
       sortedTroves: Address;
       hintHelpers: Address;
       borrowerOperations: Address;
+    };
+    tokens?: {
+      musd?: Address;
     };
     price: {
       priceFeed: Address;
@@ -134,12 +170,25 @@ export function loadAddressBook(): AddressBook {
 
   // Optional explicit overrides to avoid accidental cross-wiring when deployments move.
   // These are still gated by NETWORK/chainId checks.
-  const envBorrowerOperations = process.env.BORROWER_OPERATIONS_ADDRESS;
-  const envHintHelpers = process.env.HINT_HELPERS_ADDRESS;
-  const envSortedTroves = process.env.SORTED_TROVES_ADDRESS;
-  const envTroveManager = process.env.TROVE_MANAGER_ADDRESS;
-  const envPriceFeed = process.env.PRICE_FEED_ADDRESS;
-  const envLiquidationEngine = process.env.LIQUIDATION_ENGINE_ADDRESS;
+  const envAddressOrUndef = (name: string): Address | undefined => {
+    const raw = process.env[name];
+    if (!raw || raw === '0') return undefined;
+    if (!isAddress(raw)) {
+      log.warn(`Ignoring invalid ${name} override: ${raw}`);
+      return undefined;
+    }
+    if (raw === '0x0000000000000000000000000000000000000000') return undefined;
+    return raw as Address;
+  };
+
+  const envBorrowerOperations = envAddressOrUndef(
+    'BORROWER_OPERATIONS_ADDRESS'
+  );
+  const envHintHelpers = envAddressOrUndef('HINT_HELPERS_ADDRESS');
+  const envSortedTroves = envAddressOrUndef('SORTED_TROVES_ADDRESS');
+  const envTroveManager = envAddressOrUndef('TROVE_MANAGER_ADDRESS');
+  const envPriceFeed = envAddressOrUndef('PRICE_FEED_ADDRESS');
+  const envLiquidationEngine = envAddressOrUndef('LIQUIDATION_ENGINE_ADDRESS');
 
   return {
     chainId: Number(json.chainId),
@@ -163,6 +212,11 @@ export function loadAddressBook(): AddressBook {
           envBorrowerOperations ?? json.mezo?.core?.borrowerOperations
         ),
       },
+      tokens: json.mezo?.tokens?.musd
+        ? {
+            musd: requireAddress('mezo.tokens.musd', json.mezo?.tokens?.musd),
+          }
+        : undefined,
       price: {
         priceFeed: requireAddress(
           'mezo.price.priceFeed',

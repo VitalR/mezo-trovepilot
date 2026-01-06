@@ -1,4 +1,4 @@
-import { Address, decodeEventLog } from 'viem';
+import { Address, decodeEventLog, isAddress } from 'viem';
 import { log } from '../../src/core/logging.js';
 import { troveManagerAbi } from '../../src/abis/troveManagerAbi.js';
 import { sortedTrovesAbi } from '../../src/abis/sortedTrovesAbi.js';
@@ -19,6 +19,16 @@ import {
 } from './_lib.js';
 import { TestnetStateV1 } from './_types.js';
 
+const erc20BalanceOfAbi = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
+
 async function main() {
   const args = parseArgs();
   const { latest } = scriptPaths();
@@ -26,8 +36,18 @@ async function main() {
     argString(args, 'STATE_FILE') ?? process.env.STATE_FILE ?? latest;
 
   const state = readJsonFile<TestnetStateV1>(stateFile);
-  if (!state.trove?.owner) throw new Error('Missing trove owner in state');
-  const owner = state.trove.owner as Address;
+  const ownerArg = argString(args, 'BORROWER') ?? process.env.BORROWER ?? undefined;
+  const inferredOwner =
+    state.trove?.owner ??
+    state.keeperRunOnce?.forceBorrower ??
+    state.keeperRunOnce?.processedBorrowers?.[0];
+  const ownerRaw = ownerArg ?? inferredOwner;
+  if (!ownerRaw || !isAddress(ownerRaw)) {
+    throw new Error(
+      'Missing borrower address. Provide --BORROWER=0x... (or BORROWER env), or populate trove.owner / keeperRunOnce.forceBorrower in state.'
+    );
+  }
+  const owner = ownerRaw as Address;
 
   const book = loadAddressBook();
   const rpcUrl = requireEnv('MEZO_RPC_URL');
@@ -43,7 +63,7 @@ async function main() {
   // Check 1: Is it still below MCR (should be closed/liquidated, but if not, still report).
   const price = await getCurrentPrice({
     client: publicClient as unknown as KeeperPublicClient,
-    priceFeed: state.addresses.priceFeed,
+    priceFeed: (state.addresses?.priceFeed ?? book.mezo.price.priceFeed) as Address,
     minPrice: 0n,
     maxPrice: 0n,
     maxAgeSeconds: 0,
@@ -55,7 +75,7 @@ async function main() {
   let troveStatus: bigint | null = null;
   try {
     troveStatus = (await publicClient.readContract({
-      address: state.addresses.troveManager,
+      address: (state.addresses?.troveManager ?? book.mezo.core.troveManager) as Address,
       abi: troveManagerExtraAbi,
       functionName: 'getTroveStatus',
       args: [owner],
@@ -70,7 +90,7 @@ async function main() {
   let icr: bigint | null = null;
   try {
     icr = (await publicClient.readContract({
-      address: state.addresses.troveManager,
+      address: (state.addresses?.troveManager ?? book.mezo.core.troveManager) as Address,
       abi: troveManagerAbi,
       functionName: 'getCurrentICR',
       args: [owner, price],
@@ -88,13 +108,13 @@ async function main() {
   };
   try {
     const prev = (await publicClient.readContract({
-      address: state.addresses.sortedTroves,
+      address: (state.addresses?.sortedTroves ?? book.mezo.core.sortedTroves) as Address,
       abi: sortedTrovesAbi,
       functionName: 'getPrev',
       args: [owner],
     })) as unknown as Address;
     const next = (await publicClient.readContract({
-      address: state.addresses.sortedTroves,
+      address: (state.addresses?.sortedTroves ?? book.mezo.core.sortedTroves) as Address,
       abi: sortedTrovesAbi,
       functionName: 'getNext',
       args: [owner],
@@ -110,8 +130,12 @@ async function main() {
 
   // Check 3: LiquidationEngine events in liquidation tx (decoded).
   const engineEvents: Array<Record<string, unknown>> = [];
-  const txHash = state.keeperRunOnce?.txHash;
+  const txHash =
+    (argString(args, 'TX_HASH') ?? process.env.TX_HASH) ??
+    state.keeperRunOnce?.txHash;
   let liquidationTxConfirmed: boolean = false;
+  const engineAddress = (state.addresses?.liquidationEngine ??
+    book.trovePilot.liquidationEngine) as Address;
   if (txHash) {
     try {
       const receipt = await publicClient.waitForTransactionReceipt({
@@ -121,7 +145,7 @@ async function main() {
       for (const l of receipt.logs ?? []) {
         if (
           (l.address ?? '').toLowerCase() !==
-          state.addresses.liquidationEngine.toLowerCase()
+          engineAddress.toLowerCase()
         ) {
           continue;
         }
@@ -156,6 +180,48 @@ async function main() {
   const borrowerStatus =
     troveStatus === null ? 'unknown' : troveStatus === 1n ? 'active' : 'closed';
 
+  // Optional: show MUSD balances for engine vs keeper to understand gasComp flows.
+  const musd = book.mezo.tokens?.musd;
+  const keeperAddr =
+    state.keeper?.address ??
+    (engineEvents.find((e) => e.eventName === 'LiquidationExecuted') as any)
+      ?.args?.keeper;
+  let musdBalances:
+    | { musd: Address; engine: string; keeper?: string; keeperAddress?: Address }
+    | undefined;
+  if (musd) {
+    try {
+      const engineBal = (await publicClient.readContract({
+        address: musd,
+        abi: erc20BalanceOfAbi,
+        functionName: 'balanceOf',
+        args: [engineAddress],
+      })) as unknown as bigint;
+      let keeperBal: bigint | undefined;
+      let keeperAddress: Address | undefined;
+      if (keeperAddr && isAddress(keeperAddr)) {
+        keeperAddress = keeperAddr as Address;
+        keeperBal = (await publicClient.readContract({
+          address: musd,
+          abi: erc20BalanceOfAbi,
+          functionName: 'balanceOf',
+          args: [keeperAddress],
+        })) as unknown as bigint;
+      }
+      musdBalances = {
+        musd,
+        engine: engineBal.toString(),
+        keeper: keeperBal?.toString(),
+        keeperAddress,
+      };
+    } catch (err) {
+      log.jsonWarnWithError('testnet_verify_musd_balance_failed', err, {
+        component: 'testnet',
+        musd,
+      });
+    }
+  }
+
   log.jsonInfo('testnet_verify_summary', {
     component: 'testnet',
     stateFile,
@@ -170,6 +236,7 @@ async function main() {
     liquidatableNow,
     sortedProbe,
     keeperBalanceDeltaWei: state.keeperRunOnce?.balanceDeltaWei,
+    musdBalances,
   });
 
   // Do not fail hard purely due to closed troves; verification is informative.

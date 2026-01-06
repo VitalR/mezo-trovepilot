@@ -43,6 +43,14 @@ export interface BotConfig {
 export function loadConfig(): BotConfig {
   const defaults = loadAddressDefaults();
 
+  const parseOptionalAddressEnv = (name: string): Address | undefined => {
+    const raw = process.env[name];
+    if (!raw || raw === '0') return undefined;
+    if (!isAddress(raw)) return undefined;
+    if (raw === '0x0000000000000000000000000000000000000000') return undefined;
+    return raw as Address;
+  };
+
   const parseOptionalBigIntEnv = (name: string): bigint | undefined => {
     const raw = process.env[name];
     if (!raw || raw === '0') return undefined;
@@ -62,16 +70,16 @@ export function loadConfig(): BotConfig {
     unlockedRpcUrl: process.env.UNLOCKED_RPC_URL,
     keeperAddress: process.env.KEEPER_ADDRESS as Address | undefined,
     minKeeperBalanceWei: parseOptionalBigIntEnv('MIN_KEEPER_BALANCE_WEI'),
-    troveManager: (process.env.TROVE_MANAGER_ADDRESS ??
+    troveManager: (parseOptionalAddressEnv('TROVE_MANAGER_ADDRESS') ??
       defaults.troveManager ??
       requireEnv('TROVE_MANAGER_ADDRESS')) as Address,
-    sortedTroves: (process.env.SORTED_TROVES_ADDRESS ??
+    sortedTroves: (parseOptionalAddressEnv('SORTED_TROVES_ADDRESS') ??
       defaults.sortedTroves ??
       requireEnv('SORTED_TROVES_ADDRESS')) as Address,
-    liquidationEngine: (process.env.LIQUIDATION_ENGINE_ADDRESS ??
+    liquidationEngine: (parseOptionalAddressEnv('LIQUIDATION_ENGINE_ADDRESS') ??
       defaults.liquidationEngine ??
       requireEnv('LIQUIDATION_ENGINE_ADDRESS')) as Address,
-    priceFeed: (process.env.PRICE_FEED_ADDRESS ??
+    priceFeed: (parseOptionalAddressEnv('PRICE_FEED_ADDRESS') ??
       defaults.priceFeed ??
       requireEnv('PRICE_FEED_ADDRESS')) as Address,
     maxTxRetries: Number(process.env.MAX_TX_RETRIES ?? '2'),

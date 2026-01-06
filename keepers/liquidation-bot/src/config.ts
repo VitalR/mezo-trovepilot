@@ -104,7 +104,14 @@ type AddressDefaults = Partial<{
 
 function loadAddressDefaults(): AddressDefaults {
   const configPath = process.env.CONFIG_PATH;
-  const network = process.env.NETWORK ?? 'mezo-testnet';
+  const rawNetwork = process.env.NETWORK ?? 'mezo-testnet';
+  // Backwards/ergonomic aliases (docs/scripts often say "testnet").
+  const network =
+    rawNetwork === 'testnet'
+      ? 'mezo-testnet'
+      : rawNetwork === 'mainnet'
+      ? 'mezo'
+      : rawNetwork;
   if (!configPath) return {};
 
   try {
@@ -113,7 +120,9 @@ function loadAddressDefaults(): AddressDefaults {
     const json = JSON.parse(raw);
     if (!json || json.network !== network) {
       log.warn(
-        `CONFIG_PATH loaded but network mismatch or missing (expected ${network})`
+        `CONFIG_PATH loaded but network mismatch or missing (expected ${network}, got ${String(
+          json?.network
+        )})`
       );
       return {};
     }
@@ -198,6 +207,12 @@ function validateConfig(cfg: BotConfig) {
   const hasExt = Boolean(cfg.unlockedRpcUrl);
   const hasPk = cfg.privateKey && cfg.privateKey.length > 2;
   if (!hasExt && !hasPk) {
+    if (cfg.dryRun) {
+      log.warn(
+        'DRY_RUN enabled and no signer configured; running in read-only mode (no transactions can be sent)'
+      );
+      return;
+    }
     throw new Error(
       'Provide either KEEPER_PRIVATE_KEY or UNLOCKED_RPC_URL + KEEPER_ADDRESS'
     );

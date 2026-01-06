@@ -12,6 +12,103 @@ export interface DiscoveryStats {
   earlyExit: boolean;
 }
 
+export async function scanTrovesBelowIcr(params: {
+  client: PublicClient;
+  troveManager: Address;
+  sortedTroves: Address;
+  price: bigint;
+  thresholdIcrE18: bigint;
+  maxToScan: number;
+  /**
+   * If true, stop scanning once we have found at least one below-threshold trove
+   * and we encounter the first above-threshold trove. Mirrors keeper discovery
+   * behavior but with a configurable threshold.
+   */
+  stopAfterFirstAboveThreshold?: boolean;
+}): Promise<{
+  borrowers: Array<{ borrower: Address; icrE18: bigint }>;
+  totalScanned: bigint;
+  stats: { scanned: number; belowThreshold: number; earlyExit: boolean };
+}> {
+  const {
+    client,
+    troveManager,
+    sortedTroves,
+    price,
+    thresholdIcrE18,
+    maxToScan,
+    stopAfterFirstAboveThreshold = true,
+  } = params;
+  const maxScanBig = BigInt(maxToScan);
+
+  const size = (await client.readContract({
+    address: sortedTroves,
+    abi: sortedTrovesAbi,
+    functionName: 'getSize',
+  })) as bigint;
+
+  if (size === 0n) {
+    return {
+      borrowers: [],
+      totalScanned: 0n,
+      stats: { scanned: 0, belowThreshold: 0, earlyExit: false },
+    };
+  }
+
+  let current = (await client.readContract({
+    address: sortedTroves,
+    abi: sortedTrovesAbi,
+    functionName: 'getLast',
+  })) as Address;
+
+  const below: Array<{ borrower: Address; icrE18: bigint }> = [];
+  let checked = 0n;
+  let earlyExit = false;
+
+  while (
+    current !== '0x0000000000000000000000000000000000000000' &&
+    checked < size &&
+    checked < maxScanBig
+  ) {
+    const icr = (await client.readContract({
+      address: troveManager,
+      abi: troveManagerAbi,
+      functionName: 'getCurrentICR',
+      args: [current, price],
+    })) as bigint;
+
+    if (icr < thresholdIcrE18) {
+      below.push({ borrower: current, icrE18: icr });
+    } else if (stopAfterFirstAboveThreshold && below.length > 0) {
+      checked += 1n;
+      break;
+    }
+
+    current = (await client.readContract({
+      address: sortedTroves,
+      abi: sortedTrovesAbi,
+      functionName: 'getPrev',
+      args: [current],
+    })) as Address;
+
+    checked += 1n;
+  }
+
+  if (checked >= maxScanBig && below.length === 0) {
+    earlyExit = true;
+  }
+
+  return {
+    borrowers: below,
+    totalScanned: checked,
+    stats: {
+      scanned: Number(checked),
+      belowThreshold: below.length,
+      earlyExit,
+    },
+  };
+}
+
 export async function getLiquidatableTroves(params: {
   client: PublicClient;
   troveManager: Address;

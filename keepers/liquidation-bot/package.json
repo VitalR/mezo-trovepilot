@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "ts-node src/index.ts",
+    "start": "tsx src/index.ts",
     "lint": "echo \"TODO: add lint\"",
     "test": "vitest run",
-    "testnet:open": "ts-node scripts/testnet/01_open_trove_near_mcr.ts",
-    "testnet:poll": "ts-node scripts/testnet/02_poll_liquidatable.ts",
-    "testnet:run-once": "ts-node scripts/testnet/03_run_keeper_once.ts",
-    "testnet:verify": "ts-node scripts/testnet/04_verify_post_state.ts"
+    "testnet:open": "tsx scripts/testnet/01_open_trove_near_mcr.ts",
+    "testnet:poll": "tsx scripts/testnet/02_poll_liquidatable.ts",
+    "testnet:scan": "tsx scripts/testnet/02_poll_liquidatable.ts --SCAN=true",
+    "testnet:run-once": "tsx scripts/testnet/03_run_keeper_once.ts",
+    "testnet:verify": "tsx scripts/testnet/04_verify_post_state.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^20.11.19",
     "ts-node": "^10.9.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.3.3",
     "vitest": "^1.3.1"
   }

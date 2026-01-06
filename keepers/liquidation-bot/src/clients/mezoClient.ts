@@ -2,6 +2,8 @@ import { Address, createPublicClient, createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { BotConfig } from '../config.js';
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
+
 export function buildClients(config: BotConfig) {
   const publicTransport = http(config.rpcUrl);
   const publicClient = createPublicClient({ transport: publicTransport });
@@ -29,6 +31,19 @@ export function buildClients(config: BotConfig) {
       account: unlockedAccount,
     });
     return { publicClient, walletClient, account: unlockedAccount.address };
+  }
+
+  // DRY_RUN can be used in read-only mode (no signer); return a wallet client
+  // without an account. Any tx attempts will fail upstream because dryRun=true.
+  if (config.dryRun) {
+    const walletClient = createWalletClient({
+      transport: publicTransport,
+    });
+    return {
+      publicClient,
+      walletClient,
+      account: config.keeperAddress ?? ZERO_ADDRESS,
+    };
   }
 
   throw new Error(

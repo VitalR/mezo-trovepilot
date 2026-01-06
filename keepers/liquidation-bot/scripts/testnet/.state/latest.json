@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "network": "testnet",
+  "chainId": 31611,
+  "createdAtMs": 1767711738975,
+  "updatedAtMs": 1767711740274,
+  "addresses": {
+    "troveManager": "0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0",
+    "sortedTroves": "0x722E4D24FD6Ff8b0AC679450F3D91294607268fA",
+    "priceFeed": "0x86bCF0841622a5dAC14A313a15f96A95421b9366",
+    "borrowerOperations": "0xCdF7028ceAB81fA0C6971208e83fa7872994beE5",
+    "liquidationEngine": "0x030E9a3fDFcF67A49F8A12469f8A168bCDafA091",
+    "redemptionRouter": "0xba353C8774EBC4a2eD538B6917f34238b4aE02bA"
+  },
+  "keeper": {
+    "address": "0x0000000000000000000000000000000000000000"
+  },
+  "keeperRunOnce": {
+    "attemptedAtMs": 1767711740274,
+    "dryRun": true,
+    "processedBorrowers": [],
+    "leftoverBorrowers": [],
+    "txConfirmed": false
+  }
+}

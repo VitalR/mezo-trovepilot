@@ -26,6 +26,8 @@ import { TestnetStateV1 } from './_types.js';
 
 type CapturedEvent = Record<string, any>;
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
+
 function captureJsonLogs<T>(
   fn: () => Promise<T>
 ): Promise<{ result: T; events: CapturedEvent[] }> {
@@ -72,7 +74,6 @@ async function main() {
       : undefined) ??
     undefined;
 
-  const state = readJsonFile<TestnetStateV1>(stateFile);
   const book = loadAddressBook();
 
   const config = loadConfig();
@@ -89,6 +90,32 @@ async function main() {
   });
 
   requireConfirm(config.dryRun);
+
+  // State is optional for this script (it can run purely from config).
+  // If missing, create a minimal state so we can persist results.
+  let state: TestnetStateV1;
+  try {
+    state = readJsonFile<TestnetStateV1>(stateFile);
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+    const now = Date.now();
+    state = {
+      version: 1,
+      network: process.env.NETWORK ?? book.network,
+      chainId: book.chainId,
+      createdAtMs: now,
+      updatedAtMs: now,
+      addresses: {
+        troveManager: config.troveManager,
+        sortedTroves: config.sortedTroves,
+        priceFeed: config.priceFeed,
+        borrowerOperations: book.mezo.core.borrowerOperations,
+        liquidationEngine: config.liquidationEngine,
+        redemptionRouter: book.trovePilot.redemptionRouter,
+      },
+      keeper: { address: account },
+    };
+  }
 
   const price = await getCurrentPrice({
     client: publicClient,
@@ -128,7 +155,10 @@ async function main() {
     }
 
     const job = { borrowers: [borrower], fallbackOnFail: true };
-    const balBefore = await publicClient.getBalance({ address: account });
+    const balBefore =
+      account === ZERO_ADDRESS
+        ? 0n
+        : await publicClient.getBalance({ address: account });
     const { result: execRes, events } = await captureJsonLogs(async () => {
       return await executeLiquidationJob({
         publicClient,
@@ -147,7 +177,10 @@ async function main() {
         spendTracker,
       });
     });
-    const balAfter = await publicClient.getBalance({ address: account });
+    const balAfter =
+      account === ZERO_ADDRESS
+        ? balBefore
+        : await publicClient.getBalance({ address: account });
     const delta = balAfter - balBefore;
 
     const txConfirmed = events.find(
@@ -178,7 +211,7 @@ async function main() {
     const next: TestnetStateV1 = {
       ...state,
       updatedAtMs: now,
-      keeper: { address: account },
+      keeper: account === ZERO_ADDRESS ? state.keeper : { address: account },
       keeperRunOnce: {
         attemptedAtMs: now,
         dryRun: Boolean(config.dryRun),
@@ -189,9 +222,12 @@ async function main() {
         txHash,
         txConfirmed: Boolean(txConfirmed),
         receipt: receiptInfo,
-        balanceBeforeWei: balBefore.toString(),
-        balanceAfterWei: balAfter.toString(),
-        balanceDeltaWei: delta.toString(),
+        balanceBeforeWei:
+          account === ZERO_ADDRESS ? undefined : balBefore.toString(),
+        balanceAfterWei:
+          account === ZERO_ADDRESS ? undefined : balAfter.toString(),
+        balanceDeltaWei:
+          account === ZERO_ADDRESS ? undefined : delta.toString(),
       },
     };
     const { latest: latestPath } = scriptPaths();
@@ -238,7 +274,10 @@ async function main() {
   }
 
   // Balance snapshot for gas spend (best-effort).
-  const balBefore = await publicClient.getBalance({ address: account });
+  const balBefore =
+    account === ZERO_ADDRESS
+      ? 0n
+      : await publicClient.getBalance({ address: account });
 
   const { result: execRes, events } = await captureJsonLogs(async () => {
     const job = jobsQueue[0]!;
@@ -260,7 +299,10 @@ async function main() {
     });
   });
 
-  const balAfter = await publicClient.getBalance({ address: account });
+  const balAfter =
+    account === ZERO_ADDRESS
+      ? balBefore
+      : await publicClient.getBalance({ address: account });
   const delta = balAfter - balBefore;
 
   // Best-effort tx hash extraction from tx_sent/tx_confirmed events.
@@ -287,7 +329,7 @@ async function main() {
   const next: TestnetStateV1 = {
     ...state,
     updatedAtMs: now,
-    keeper: { address: account },
+    keeper: account === ZERO_ADDRESS ? state.keeper : { address: account },
     keeperRunOnce: {
       attemptedAtMs: now,
       dryRun: Boolean(config.dryRun),
@@ -313,9 +355,11 @@ async function main() {
                 : undefined,
             }
           : undefined,
-      balanceBeforeWei: balBefore.toString(),
-      balanceAfterWei: balAfter.toString(),
-      balanceDeltaWei: delta.toString(),
+      balanceBeforeWei:
+        account === ZERO_ADDRESS ? undefined : balBefore.toString(),
+      balanceAfterWei:
+        account === ZERO_ADDRESS ? undefined : balAfter.toString(),
+      balanceDeltaWei: account === ZERO_ADDRESS ? undefined : delta.toString(),
     },
   };
 

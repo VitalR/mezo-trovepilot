@@ -23,8 +23,16 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     /// @param attempted     Number of troves attempted.
     /// @param succeeded     Number of successful liquidations.
     /// @param fallbackUsed  True if batch failed and per-borrower fallback was attempted.
+    /// @param nativeReward  Native coin amount forwarded to keeper (delta of `address(this).balance`).
+    /// @param musdReward    MUSD amount forwarded to keeper (delta of `MUSD.balanceOf(address(this))`).
     event LiquidationExecuted(
-        uint256 indexed jobId, address indexed keeper, uint256 attempted, uint256 succeeded, bool fallbackUsed
+        uint256 indexed jobId,
+        address indexed keeper,
+        uint256 attempted,
+        uint256 succeeded,
+        bool fallbackUsed,
+        uint256 nativeReward,
+        uint256 musdReward
     );
 
     /// @notice Emitted when funds are swept out of the contract.
@@ -37,13 +45,22 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     /// @notice TroveManager proxy used for liquidations.
     ITroveManager public immutable TROVE_MANAGER;
 
+    /// @notice MUSD token used for keeper gas compensation during liquidations.
+    /// @dev Mezo liquidations can credit MUSD gas compensation to `msg.sender`.
+    /// Since this engine is the `msg.sender` for TroveManager calls, any MUSD gas comp
+    /// is first credited to this contract and then forwarded to the keeper.
+    IERC20 public immutable MUSD;
+
     /// @notice Monotonic identifier for off-chain indexing.
     uint256 public jobId;
 
     /// @param _troveManager TroveManager proxy address.
-    constructor(address _troveManager) Ownable(msg.sender) {
+    /// @param _musd MUSD token address (ERC-20).
+    constructor(address _troveManager, address _musd) Ownable(msg.sender) {
         require(_troveManager != address(0), Errors.ZeroAddress());
+        require(_musd != address(0), Errors.ZeroAddress());
         TROVE_MANAGER = ITroveManager(_troveManager);
+        MUSD = IERC20(_musd);
     }
 
     /// @notice Execute liquidations against provided borrowers.
@@ -59,7 +76,11 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
         nonReentrant
         returns (uint256 succeeded)
     {
+        // Rewards are observed as deltas on this contract, then forwarded to the keeper.
+        // Native deltas capture Mezo native refunds/rewards routed to this engine.
         uint256 balanceBefore = address(this).balance;
+        // MUSD deltas capture Mezo gas compensation credited to the liquidator (this engine).
+        uint256 musdBefore = MUSD.balanceOf(address(this));
         uint256 len = borrowers.length;
         require(len > 0, Errors.EmptyArray());
 
@@ -88,14 +109,27 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
             }
         }
 
+        uint256 musdAfter = MUSD.balanceOf(address(this));
+        uint256 musdReward = 0;
+        if (musdAfter > musdBefore) {
+            unchecked {
+                musdReward = musdAfter - musdBefore;
+            }
+            // Forward MUSD gas compensation to the keeper in the same tx (no claim step).
+            MUSD.safeTransfer(msg.sender, musdReward);
+        }
+
         uint256 balanceAfter = address(this).balance;
+        uint256 nativeReward = 0;
         if (balanceAfter > balanceBefore) {
-            uint256 reward = balanceAfter - balanceBefore;
-            (bool ok,) = msg.sender.call{ value: reward }("");
+            unchecked {
+                nativeReward = balanceAfter - balanceBefore;
+            }
+            (bool ok,) = msg.sender.call{ value: nativeReward }("");
             if (!ok) revert Errors.RewardPayoutFailed();
         }
 
-        emit LiquidationExecuted(++jobId, msg.sender, len, succeeded, fallbackUsed);
+        emit LiquidationExecuted(++jobId, msg.sender, len, succeeded, fallbackUsed, nativeReward, musdReward);
     }
 
     /// @notice Emergency escape hatch. Should never be required during normal operation.

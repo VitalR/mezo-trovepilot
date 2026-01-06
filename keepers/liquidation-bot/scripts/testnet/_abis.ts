@@ -102,6 +102,8 @@ export const liquidationEngineEventsAbi = [
       { name: 'attempted', type: 'uint256', indexed: false },
       { name: 'succeeded', type: 'uint256', indexed: false },
       { name: 'fallbackUsed', type: 'bool', indexed: false },
+      { name: 'nativeReward', type: 'uint256', indexed: false },
+      { name: 'musdReward', type: 'uint256', indexed: false },
     ],
     anonymous: false,
   },

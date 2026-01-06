@@ -12,6 +12,8 @@ contract MockTroveManager is ITroveManager {
     bool public revertBatch;
     mapping(address => bool) public revertSingle;
     uint256 public rewardNative;
+    uint256 public rewardMUSD;
+    MockERC20 public musdToken;
 
     address[] public lastBatch;
     uint256 public singleCalls;
@@ -31,6 +33,11 @@ contract MockTroveManager is ITroveManager {
         rewardNative = value;
     }
 
+    function setRewardMUSD(address token, uint256 value) external {
+        musdToken = MockERC20(token);
+        rewardMUSD = value;
+    }
+
     function setRevertBatch(bool v) external {
         revertBatch = v;
     }
@@ -46,6 +53,9 @@ contract MockTroveManager is ITroveManager {
             (bool ok,) = payable(msg.sender).call{ value: rewardNative }("");
             require(ok, "reward fail");
         }
+        if (rewardMUSD != 0) {
+            musdToken.mint(msg.sender, rewardMUSD);
+        }
     }
 
     function batchLiquidate(address[] calldata _borrowers) external override {
@@ -54,6 +64,9 @@ contract MockTroveManager is ITroveManager {
         if (rewardNative != 0) {
             (bool ok,) = payable(msg.sender).call{ value: rewardNative }("");
             require(ok, "reward fail");
+        }
+        if (rewardMUSD != 0) {
+            musdToken.mint(msg.sender, rewardMUSD);
         }
     }
 

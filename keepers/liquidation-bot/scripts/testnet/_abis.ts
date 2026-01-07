@@ -92,6 +92,9 @@ export const troveManagerExtraAbi = [
 ] as const;
 
 // Event surface for post-state verification.
+//
+// We only support the current LiquidationEngine version (with explicit reward fields).
+// If decoding fails, you're likely pointing at an old engine deployment.
 export const liquidationEngineEventsAbi = [
   {
     type: 'event',
@@ -99,9 +102,9 @@ export const liquidationEngineEventsAbi = [
     inputs: [
       { name: 'jobId', type: 'uint256', indexed: true },
       { name: 'keeper', type: 'address', indexed: true },
+      { name: 'recipient', type: 'address', indexed: true },
       { name: 'attempted', type: 'uint256', indexed: false },
       { name: 'succeeded', type: 'uint256', indexed: false },
-      { name: 'fallbackUsed', type: 'bool', indexed: false },
       { name: 'nativeReward', type: 'uint256', indexed: false },
       { name: 'musdReward', type: 'uint256', indexed: false },
     ],

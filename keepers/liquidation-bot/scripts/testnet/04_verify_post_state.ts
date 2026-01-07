@@ -36,7 +36,8 @@ async function main() {
     argString(args, 'STATE_FILE') ?? process.env.STATE_FILE ?? latest;
 
   const state = readJsonFile<TestnetStateV1>(stateFile);
-  const ownerArg = argString(args, 'BORROWER') ?? process.env.BORROWER ?? undefined;
+  const ownerArg =
+    argString(args, 'BORROWER') ?? process.env.BORROWER ?? undefined;
   const inferredOwner =
     state.trove?.owner ??
     state.keeperRunOnce?.forceBorrower ??
@@ -63,7 +64,8 @@ async function main() {
   // Check 1: Is it still below MCR (should be closed/liquidated, but if not, still report).
   const price = await getCurrentPrice({
     client: publicClient as unknown as KeeperPublicClient,
-    priceFeed: (state.addresses?.priceFeed ?? book.mezo.price.priceFeed) as Address,
+    priceFeed: (state.addresses?.priceFeed ??
+      book.mezo.price.priceFeed) as Address,
     minPrice: 0n,
     maxPrice: 0n,
     maxAgeSeconds: 0,
@@ -75,7 +77,8 @@ async function main() {
   let troveStatus: bigint | null = null;
   try {
     troveStatus = (await publicClient.readContract({
-      address: (state.addresses?.troveManager ?? book.mezo.core.troveManager) as Address,
+      address: (state.addresses?.troveManager ??
+        book.mezo.core.troveManager) as Address,
       abi: troveManagerExtraAbi,
       functionName: 'getTroveStatus',
       args: [owner],
@@ -90,7 +93,8 @@ async function main() {
   let icr: bigint | null = null;
   try {
     icr = (await publicClient.readContract({
-      address: (state.addresses?.troveManager ?? book.mezo.core.troveManager) as Address,
+      address: (state.addresses?.troveManager ??
+        book.mezo.core.troveManager) as Address,
       abi: troveManagerAbi,
       functionName: 'getCurrentICR',
       args: [owner, price],
@@ -108,13 +112,15 @@ async function main() {
   };
   try {
     const prev = (await publicClient.readContract({
-      address: (state.addresses?.sortedTroves ?? book.mezo.core.sortedTroves) as Address,
+      address: (state.addresses?.sortedTroves ??
+        book.mezo.core.sortedTroves) as Address,
       abi: sortedTrovesAbi,
       functionName: 'getPrev',
       args: [owner],
     })) as unknown as Address;
     const next = (await publicClient.readContract({
-      address: (state.addresses?.sortedTroves ?? book.mezo.core.sortedTroves) as Address,
+      address: (state.addresses?.sortedTroves ??
+        book.mezo.core.sortedTroves) as Address,
       abi: sortedTrovesAbi,
       functionName: 'getNext',
       args: [owner],
@@ -131,22 +137,21 @@ async function main() {
   // Check 3: LiquidationEngine events in liquidation tx (decoded).
   const engineEvents: Array<Record<string, unknown>> = [];
   const txHash =
-    (argString(args, 'TX_HASH') ?? process.env.TX_HASH) ??
+    argString(args, 'TX_HASH') ??
+    process.env.TX_HASH ??
     state.keeperRunOnce?.txHash;
   let liquidationTxConfirmed: boolean = false;
-  const engineAddress = (state.addresses?.liquidationEngine ??
-    book.trovePilot.liquidationEngine) as Address;
+  // Prefer the canonical address book value (CONFIG_PATH), since `.state/latest.json`
+  // may contain stale addresses from previous deployments.
+  const engineAddress = book.trovePilot.liquidationEngine as Address;
   if (txHash) {
     try {
       const receipt = await publicClient.waitForTransactionReceipt({
-        hash: txHash,
+        hash: txHash as `0x${string}`,
       });
       liquidationTxConfirmed = receipt.status === 'success';
       for (const l of receipt.logs ?? []) {
-        if (
-          (l.address ?? '').toLowerCase() !==
-          engineAddress.toLowerCase()
-        ) {
+        if ((l.address ?? '').toLowerCase() !== engineAddress.toLowerCase()) {
           continue;
         }
         try {
@@ -160,7 +165,7 @@ async function main() {
             args: decoded.args as any,
           });
         } catch {
-          // Ignore non-matching logs; LiquidationEngine has a small surface.
+          // Ignore non-matching logs.
         }
       }
     } catch (err) {
@@ -180,6 +185,12 @@ async function main() {
   const borrowerStatus =
     troveStatus === null ? 'unknown' : troveStatus === 1n ? 'active' : 'closed';
 
+  if (txHash && engineEvents.length === 0) {
+    throw new Error(
+      'Unable to decode LiquidationEngine events for this tx. Ensure configs/addresses.testnet.json points to the current LiquidationEngine deployment.'
+    );
+  }
+
   // Optional: show MUSD balances for engine vs keeper to understand gasComp flows.
   const musd = book.mezo.tokens?.musd;
   const keeperAddr =
@@ -187,7 +198,12 @@ async function main() {
     (engineEvents.find((e) => e.eventName === 'LiquidationExecuted') as any)
       ?.args?.keeper;
   let musdBalances:
-    | { musd: Address; engine: string; keeper?: string; keeperAddress?: Address }
+    | {
+        musd: Address;
+        engine: string;
+        keeper?: string;
+        keeperAddress?: Address;
+      }
     | undefined;
   if (musd) {
     try {

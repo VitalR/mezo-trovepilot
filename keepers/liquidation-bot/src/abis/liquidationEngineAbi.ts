@@ -1,11 +1,21 @@
 export const liquidationEngineAbi = [
   {
     type: 'function',
-    name: 'liquidateRange',
+    name: 'liquidateSingle',
     stateMutability: 'nonpayable',
     inputs: [
-      { name: 'borrowers', type: 'address[]' },
-      { name: 'fallbackOnFail', type: 'bool' },
+      { name: '_borrower', type: 'address' },
+      { name: '_recipient', type: 'address' },
+    ],
+    outputs: [{ name: 'succeeded', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'liquidateBatch',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: '_borrowers', type: 'address[]' },
+      { name: '_recipient', type: 'address' },
     ],
     outputs: [{ name: 'succeeded', type: 'uint256' }],
   },

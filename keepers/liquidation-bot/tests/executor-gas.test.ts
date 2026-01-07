@@ -66,6 +66,7 @@ describe('executor gas cap', () => {
           throw new Error('no eip1559');
         },
         async estimateContractGas(opts: any) {
+          if (opts.functionName === 'liquidateSingle') return 80_000n;
           const borrowerCount = opts.args[0].length;
           return borrowerCount === 1 ? 80_000n : 200_000n;
         },
@@ -83,7 +84,9 @@ describe('executor gas cap', () => {
         account: '0xabc' as Address,
         async writeContract(args: any) {
           sent = true;
-          expect(args.args[0]).toEqual(['0x1', '0x2'].slice(0, 1));
+          expect(args.functionName).toBe('liquidateSingle');
+          expect(args.args[0]).toBe('0x1');
+          expect(args.args[1]).toBe('0xabc');
           return '0xhash';
         },
       } as any,
@@ -120,6 +123,7 @@ describe('executor gas cap', () => {
         throw new Error('no eip1559');
       },
       async estimateContractGas(opts: any) {
+        if (opts.functionName === 'liquidateSingle') return 60_000n;
         const count = opts.args[0].length;
         if (count >= 8) return 400_000n;
         if (count >= 4) return 220_000n;

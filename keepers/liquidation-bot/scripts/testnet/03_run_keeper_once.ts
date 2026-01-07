@@ -91,6 +91,15 @@ async function main() {
 
   requireConfirm(config.dryRun);
 
+  const canonicalAddresses = {
+    troveManager: config.troveManager,
+    sortedTroves: config.sortedTroves,
+    priceFeed: config.priceFeed,
+    borrowerOperations: book.mezo.core.borrowerOperations,
+    liquidationEngine: config.liquidationEngine,
+    redemptionRouter: book.trovePilot.redemptionRouter,
+  };
+
   // State is optional for this script (it can run purely from config).
   // If missing, create a minimal state so we can persist results.
   let state: TestnetStateV1;
@@ -105,14 +114,7 @@ async function main() {
       chainId: book.chainId,
       createdAtMs: now,
       updatedAtMs: now,
-      addresses: {
-        troveManager: config.troveManager,
-        sortedTroves: config.sortedTroves,
-        priceFeed: config.priceFeed,
-        borrowerOperations: book.mezo.core.borrowerOperations,
-        liquidationEngine: config.liquidationEngine,
-        redemptionRouter: book.trovePilot.redemptionRouter,
-      },
+      addresses: canonicalAddresses,
       keeper: { address: account },
     };
   }
@@ -211,6 +213,9 @@ async function main() {
     const next: TestnetStateV1 = {
       ...state,
       updatedAtMs: now,
+      // Always persist canonical addresses from CONFIG_PATH/env for consistency.
+      // This prevents stale `.state/latest.json` from pinning an old engine address.
+      addresses: canonicalAddresses,
       keeper: account === ZERO_ADDRESS ? state.keeper : { address: account },
       keeperRunOnce: {
         attemptedAtMs: now,
@@ -334,6 +339,8 @@ async function main() {
   const next: TestnetStateV1 = {
     ...state,
     updatedAtMs: now,
+    // Always persist canonical addresses from CONFIG_PATH/env for consistency.
+    addresses: canonicalAddresses,
     keeper: account === ZERO_ADDRESS ? state.keeper : { address: account },
     keeperRunOnce: {
       attemptedAtMs: now,

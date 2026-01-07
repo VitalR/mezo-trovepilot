@@ -94,13 +94,33 @@ export async function executeLiquidationJob(params: {
     `Submitting liquidation: count=${job.borrowers.length} fallback=${job.fallbackOnFail}`
   );
 
+  if (!fromAddress) {
+    throw new Error(
+      'Missing fromAddress for non-dry-run liquidation; ensure a signer is configured.'
+    );
+  }
+  // Snapshot the now-known sender/recipient address so nested functions
+  // don't see the wider `Address | undefined` type.
+  const recipient: Address = fromAddress;
+
   async function estimate(bList: Address[]) {
+    // Prefer liquidateSingle for the common 1-borrower case.
+    // Batch remains available for multi-borrower jobs.
+    if (bList.length === 1) {
+      return publicClient.estimateContractGas({
+        address: liquidationEngine,
+        abi: liquidationEngineAbi,
+        functionName: 'liquidateSingle',
+        args: [bList[0]!, recipient],
+        account: recipient,
+      });
+    }
     return publicClient.estimateContractGas({
       address: liquidationEngine,
       abi: liquidationEngineAbi,
-      functionName: 'liquidateRange',
-      args: [bList, job.fallbackOnFail],
-      account: fromAddress,
+      functionName: 'liquidateBatch',
+      args: [bList, recipient],
+      account: recipient,
     });
   }
 
@@ -415,11 +435,18 @@ export async function executeLiquidationJob(params: {
 
       const borrowersForTx = originalBorrowers.slice(0, workingCount);
 
+      const fn =
+        borrowersForTx.length === 1 ? 'liquidateSingle' : 'liquidateBatch';
+      const args =
+        borrowersForTx.length === 1
+          ? [borrowersForTx[0]!, recipient]
+          : [borrowersForTx, recipient];
+
       const txArgs: Record<string, unknown> = {
         address: liquidationEngine,
         abi: liquidationEngineAbi,
-        functionName: 'liquidateRange',
-        args: [borrowersForTx, job.fallbackOnFail],
+        functionName: fn,
+        args,
         account: (walletAccount ?? null) as Account | Address | null,
         gas: gasEstimate,
       };

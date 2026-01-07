@@ -7,6 +7,7 @@ import {
   http,
   isAddress,
   PublicClient,
+  webSocket,
 } from 'viem';
 import { log, setLogContext } from '../../src/core/logging.js';
 
@@ -240,7 +241,27 @@ export function loadAddressBook(): AddressBook {
 }
 
 export function buildPublicClient(rpcUrl: string): PublicClient {
-  return createPublicClient({ transport: http(rpcUrl) });
+  const timeout =
+    process.env.RPC_TIMEOUT_MS && Number(process.env.RPC_TIMEOUT_MS) > 0
+      ? Number(process.env.RPC_TIMEOUT_MS)
+      : 60_000;
+  const retryCount =
+    process.env.RPC_RETRY_COUNT && Number(process.env.RPC_RETRY_COUNT) >= 0
+      ? Number(process.env.RPC_RETRY_COUNT)
+      : 2;
+  const retryDelay =
+    process.env.RPC_RETRY_DELAY_MS &&
+    Number(process.env.RPC_RETRY_DELAY_MS) >= 0
+      ? Number(process.env.RPC_RETRY_DELAY_MS)
+      : 250;
+
+  const url = rpcUrl.trim();
+  const transport =
+    url.startsWith('ws://') || url.startsWith('wss://')
+      ? webSocket(url, { retryCount, retryDelay })
+      : http(url, { timeout, retryCount, retryDelay });
+
+  return createPublicClient({ transport });
 }
 
 export async function assertTestnet(client: PublicClient, book: AddressBook) {

@@ -56,20 +56,20 @@ contract TrovePilotDeployScript is Script {
 
         vm.startBroadcast(pk);
 
-        // Deploy RedemptionRouter (stateless)
-        deployedRouter = address(
-            new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS, MezoAddresses.SORTED_TROVES)
-        );
+        // // Deploy RedemptionRouter (stateless)
+        // deployedRouter = address(
+        //     new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS, MezoAddresses.SORTED_TROVES)
+        // );
 
         // Deploy LiquidationEngine (stateless except jobId; owner = deployer)
-        deployedEngine = address(new LiquidationEngine(MezoAddresses.TROVE_MANAGER));
+        deployedEngine = address(new LiquidationEngine(MezoAddresses.TROVE_MANAGER, MezoAddresses.MUSD));
 
         vm.stopBroadcast();
 
         _writeManifest();
 
         console2.log("=== TrovePilot deployed (Mezo testnet) ===");
-        console2.log("RedemptionRouter:", deployedRouter);
+        // console2.log("RedemptionRouter:", deployedRouter);
         console2.log("LiquidationEngine:", deployedEngine);
         console2.log("Owner (LiquidationEngine):", vm.addr(pk));
     }
@@ -81,7 +81,7 @@ contract TrovePilotDeployScript is Script {
 
         AddressesCfg memory cfg = _loadConfig(path);
         cfg.trovePilot.liquidationEngine = deployedEngine;
-        cfg.trovePilot.redemptionRouter = deployedRouter;
+        cfg.trovePilot.redemptionRouter = 0xba353C8774EBC4a2eD538B6917f34238b4aE02bA;// deployedRouter;
 
         string memory json = string.concat(
             "{\n",

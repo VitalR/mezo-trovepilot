@@ -44,28 +44,34 @@ contract LiquidationEngineTest is Test {
         borrowers[1] = address(2);
 
         vm.expectEmit(true, true, false, true);
-        emit LiquidationEngine.LiquidationExecuted(1, keeper, 2, 2, false, 0, 0);
+        emit LiquidationEngine.LiquidationExecuted(1, keeper, keeper, 2, 2, 0, 0);
         vm.prank(keeper);
-        uint256 succeeded = engine.liquidateRange(borrowers, false);
+        uint256 succeeded = engine.liquidateBatch(borrowers, keeper);
 
         assertEq(succeeded, 2);
         assertEq(engine.jobId(), 1);
         assertEq(tm.lastBatchLength(), 2);
     }
 
-    function test_liquidation_batch_reverts_then_fallback_succeeds_all() public {
-        tm.setRevertBatch(true);
-        address[] memory borrowers = new address[](3);
-        borrowers[0] = address(1);
-        borrowers[1] = address(2);
-        borrowers[2] = address(3);
-
+    function test_liquidation_single_success() public {
+        address borrower = address(1);
+        vm.expectEmit(true, true, false, true);
+        emit LiquidationEngine.LiquidationExecuted(1, keeper, keeper, 1, 1, 0, 0);
         vm.prank(keeper);
-        uint256 succeeded = engine.liquidateRange(borrowers, true);
-
-        assertEq(succeeded, 3);
-        assertEq(tm.singleCalls(), 3);
+        uint256 succeeded = engine.liquidateSingle(borrower, keeper);
+        assertEq(succeeded, 1);
         assertEq(engine.jobId(), 1);
+        assertEq(tm.singleCalls(), 1);
+    }
+
+    function test_liquidation_batch_reverts_when_trove_manager_batch_reverts() public {
+        tm.setRevertBatch(true);
+        address[] memory borrowers = new address[](1);
+        borrowers[0] = address(1);
+
+        vm.expectRevert();
+        vm.prank(keeper);
+        engine.liquidateBatch(borrowers, keeper);
     }
 
     function test_liquidation_rewards_forwarded_to_keeper_batch() public {
@@ -76,9 +82,19 @@ contract LiquidationEngineTest is Test {
         borrowers[0] = address(1);
 
         vm.prank(keeper);
-        engine.liquidateRange(borrowers, false);
+        engine.liquidateBatch(borrowers, keeper);
 
         assertEq(address(keeper).balance, 1 ether);
+    }
+
+    function test_liquidation_musd_rewards_forwarded_to_keeper_single() public {
+        tm.setRewardMUSD(address(musdToken), 200 ether);
+
+        vm.prank(keeper);
+        engine.liquidateSingle(address(1), keeper);
+
+        assertEq(musdToken.balanceOf(keeper), 200 ether);
+        assertEq(musdToken.balanceOf(address(engine)), 0);
     }
 
     function test_liquidation_musd_rewards_forwarded_to_keeper_batch() public {
@@ -88,85 +104,30 @@ contract LiquidationEngineTest is Test {
         borrowers[0] = address(1);
 
         vm.prank(keeper);
-        engine.liquidateRange(borrowers, false);
+        engine.liquidateBatch(borrowers, keeper);
 
         assertEq(musdToken.balanceOf(keeper), 200 ether);
         assertEq(musdToken.balanceOf(address(engine)), 0);
     }
 
-    function test_liquidation_rewards_forwarded_to_keeper_fallback() public {
-        tm.setRewardNative(0.5 ether);
-        tm.setRevertBatch(true);
-        vm.deal(address(tm), 1 ether);
-
-        address[] memory borrowers = new address[](2);
-        borrowers[0] = address(1);
-        borrowers[1] = address(2);
-
-        vm.prank(keeper);
-        engine.liquidateRange(borrowers, true);
-
-        // Two single liquidations each pay 0.5 ether to engine; engine forwards 1 ether to keeper.
-        assertEq(address(keeper).balance, 1 ether);
-    }
-
-    function test_liquidation_musd_rewards_forwarded_to_keeper_fallback() public {
-        tm.setRewardMUSD(address(musdToken), 200 ether);
-        tm.setRevertBatch(true);
-
-        address[] memory borrowers = new address[](2);
-        borrowers[0] = address(1);
-        borrowers[1] = address(2);
-
-        vm.prank(keeper);
-        engine.liquidateRange(borrowers, true);
-
-        // Two single liquidations each credit 200 MUSD to engine; engine forwards total to keeper.
-        assertEq(musdToken.balanceOf(keeper), 400 ether);
-        assertEq(musdToken.balanceOf(address(engine)), 0);
-    }
-
-    function test_liquidation_fallback_flag_when_batch_succeeds() public {
-        address[] memory borrowers = new address[](1);
-        borrowers[0] = address(1);
-
-        vm.prank(keeper);
-        uint256 succeeded = engine.liquidateRange(borrowers, true);
-
-        assertEq(succeeded, 1);
-        assertEq(engine.jobId(), 1);
-        assertEq(tm.singleCalls(), 0);
-    }
-
-    function test_liquidation_fallback_partial_success() public {
-        tm.setRevertBatch(true);
-        tm.setRevertSingle(address(2), true);
-        address[] memory borrowers = new address[](2);
-        borrowers[0] = address(1);
-        borrowers[1] = address(2);
-
-        vm.prank(keeper);
-        uint256 succeeded = engine.liquidateRange(borrowers, true);
-
-        assertEq(tm.singleCalls(), 1);
-        assertEq(succeeded, 1);
-        assertEq(engine.jobId(), 1);
-    }
-
-    function test_revert_liquidation_batch_when_no_fallback() public {
-        tm.setRevertBatch(true);
-        address[] memory borrowers = new address[](1);
-        borrowers[0] = address(1);
-
-        vm.expectRevert();
-        vm.prank(keeper);
-        engine.liquidateRange(borrowers, false);
-    }
-
     function test_revert_on_empty_borrowers() public {
         address[] memory borrowers = new address[](0);
         vm.expectRevert();
-        engine.liquidateRange(borrowers, false);
+        engine.liquidateBatch(borrowers, keeper);
+    }
+
+    function test_revert_on_zero_recipient_single() public {
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        vm.prank(keeper);
+        engine.liquidateSingle(address(1), address(0));
+    }
+
+    function test_revert_on_zero_recipient_batch() public {
+        address[] memory borrowers = new address[](1);
+        borrowers[0] = address(1);
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        vm.prank(keeper);
+        engine.liquidateBatch(borrowers, address(0));
     }
 
     function test_sweep_native_and_token_only_owner() public {

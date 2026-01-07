@@ -10,7 +10,7 @@ import { ITroveManager } from "./interfaces/ITroveManager.sol";
 import { Errors } from "./utils/Errors.sol";
 
 /// @title TrovePilot LiquidationEngine
-/// @notice Minimal, permissionless liquidation executor for Mezo troves with deterministic fallback behavior.
+/// @notice Minimal, permissionless liquidation executor for Mezo troves.
 /// @dev Stateless aside from a monotonic `jobId`. No fees, no governance, no scoring.
 ///      Spec reference: docs/CONTRACTS_V2.md (LiquidationEngine).
 /// @custom:invariant Only state is `jobId`; no custodial balances should remain post-sweep.
@@ -20,20 +20,26 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     /// @notice Emitted after a liquidation attempt completes.
     /// @param jobId         Monotonic identifier for off-chain indexing.
     /// @param keeper        Original caller of the engine.
+    /// @param recipient     Address receiving rewards (native + MUSD).
     /// @param attempted     Number of troves attempted.
     /// @param succeeded     Number of successful liquidations.
-    /// @param fallbackUsed  True if batch failed and per-borrower fallback was attempted.
     /// @param nativeReward  Native coin amount forwarded to keeper (delta of `address(this).balance`).
     /// @param musdReward    MUSD amount forwarded to keeper (delta of `MUSD.balanceOf(address(this))`).
     event LiquidationExecuted(
         uint256 indexed jobId,
         address indexed keeper,
+        address indexed recipient,
         uint256 attempted,
         uint256 succeeded,
-        bool fallbackUsed,
         uint256 nativeReward,
         uint256 musdReward
     );
+
+    /// @notice Emitted when the engine is initialized.
+    /// @param troveManager TroveManager proxy address.
+    /// @param musd MUSD token address.
+    /// @param owner Owner address.
+    event LiquidationEngineInitialized(address indexed troveManager, address indexed musd, address indexed owner);
 
     /// @notice Emitted when funds are swept out of the contract.
     /// @param caller    Address that initiated the sweep (owner).
@@ -61,75 +67,80 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
         require(_musd != address(0), Errors.ZeroAddress());
         TROVE_MANAGER = ITroveManager(_troveManager);
         MUSD = IERC20(_musd);
+
+        emit LiquidationEngineInitialized(_troveManager, _musd, msg.sender);
     }
 
-    /// @notice Execute liquidations against provided borrowers.
-    /// @dev Deterministic behavior:
-    ///      - If `fallbackOnFail` is false, only `batchLiquidate` is attempted and will bubble the revert.
-    ///      - If `fallbackOnFail` is true, try `batchLiquidate`; on revert attempt single `liquidate` per borrower
-    /// once.
-    /// @param borrowers List of troves to liquidate.
-    /// @param fallbackOnFail Whether to fall back to per-borrower loop if batch reverts.
-    /// @return succeeded Number of successful liquidations.
-    function liquidateRange(address[] calldata borrowers, bool fallbackOnFail)
+    /// @notice Liquidate a single trove directly via TroveManager.
+    /// @dev This entrypoint has strict semantics: it either succeeds or reverts.
+    /// @param _borrower The trove owner to liquidate.
+    /// @param _recipient Address to receive rewards (native + MUSD). Must be non-zero.
+    /// @return succeeded Always 1 on success (reverts if TroveManager reverts).
+    function liquidateSingle(address _borrower, address _recipient) external nonReentrant returns (uint256 succeeded) {
+        require(_borrower != address(0), Errors.ZeroAddress());
+        require(_recipient != address(0), Errors.ZeroAddress());
+
+        uint256 balanceBefore = address(this).balance;
+        uint256 musdBefore = MUSD.balanceOf(address(this));
+
+        TROVE_MANAGER.liquidate(_borrower);
+
+        (uint256 nativeReward, uint256 musdReward) = _forwardRewards(balanceBefore, musdBefore, _recipient);
+        emit LiquidationExecuted(++jobId, msg.sender, _recipient, 1, 1, nativeReward, musdReward);
+        return 1;
+    }
+
+    /// @notice Batch liquidate provided borrowers.
+    /// @dev Strict semantics: reverts if TroveManager batchLiquidate reverts.
+    /// @param _borrowers List of troves to liquidate.
+    /// @param _recipient Address to receive rewards (native + MUSD). Must be non-zero.
+    /// @return succeeded Always equals borrowers.length on success (reverts on failure).
+    function liquidateBatch(address[] calldata _borrowers, address _recipient)
         external
         nonReentrant
         returns (uint256 succeeded)
     {
-        // Rewards are observed as deltas on this contract, then forwarded to the keeper.
-        // Native deltas capture Mezo native refunds/rewards routed to this engine.
-        uint256 balanceBefore = address(this).balance;
-        // MUSD deltas capture Mezo gas compensation credited to the liquidator (this engine).
-        uint256 musdBefore = MUSD.balanceOf(address(this));
-        uint256 len = borrowers.length;
+        require(_recipient != address(0), Errors.ZeroAddress());
+        uint256 len = _borrowers.length;
         require(len > 0, Errors.EmptyArray());
 
-        bool fallbackUsed = false;
-        bool batchSuccess = true;
+        uint256 balanceBefore = address(this).balance;
+        uint256 musdBefore = MUSD.balanceOf(address(this));
 
-        if (!fallbackOnFail) {
-            TROVE_MANAGER.batchLiquidate(borrowers);
-            succeeded = len;
-        } else {
-            try TROVE_MANAGER.batchLiquidate(borrowers) {
-                succeeded = len;
-            } catch {
-                batchSuccess = false;
-                fallbackUsed = true;
-            }
+        TROVE_MANAGER.batchLiquidate(_borrowers);
 
-            if (!batchSuccess) {
-                for (uint256 i = 0; i < len; ++i) {
-                    try TROVE_MANAGER.liquidate(borrowers[i]) {
-                        unchecked {
-                            ++succeeded;
-                        }
-                    } catch { }
-                }
-            }
-        }
+        (uint256 nativeReward, uint256 musdReward) = _forwardRewards(balanceBefore, musdBefore, _recipient);
+        emit LiquidationExecuted(++jobId, msg.sender, _recipient, len, len, nativeReward, musdReward);
+        return len;
+    }
 
+    /// @dev Forwards any newly accrued native + MUSD balances to `_recipient`.
+    /// @param nativeBefore Native balance snapshot taken before liquidation calls.
+    /// @param musdBefore MUSD balance snapshot taken before liquidation calls.
+    /// @param _recipient Address receiving rewards (native + MUSD).
+    /// @return nativeReward Native amount forwarded to keeper.
+    /// @return musdReward MUSD amount forwarded to keeper.
+    function _forwardRewards(uint256 nativeBefore, uint256 musdBefore, address _recipient)
+        internal
+        returns (uint256 nativeReward, uint256 musdReward)
+    {
         uint256 musdAfter = MUSD.balanceOf(address(this));
-        uint256 musdReward = 0;
         if (musdAfter > musdBefore) {
             unchecked {
                 musdReward = musdAfter - musdBefore;
             }
             // Forward MUSD gas compensation to the keeper in the same tx (no claim step).
-            MUSD.safeTransfer(msg.sender, musdReward);
+            MUSD.safeTransfer(_recipient, musdReward);
         }
 
-        uint256 balanceAfter = address(this).balance;
-        uint256 nativeReward = 0;
-        if (balanceAfter > balanceBefore) {
+        uint256 nativeAfter = address(this).balance;
+        if (nativeAfter > nativeBefore) {
             unchecked {
-                nativeReward = balanceAfter - balanceBefore;
+                nativeReward = nativeAfter - nativeBefore;
             }
-            (bool ok,) = msg.sender.call{ value: nativeReward }("");
+            (bool ok,) = payable(_recipient).call{ value: nativeReward }("");
             if (!ok) revert Errors.RewardPayoutFailed();
         }
-
-        emit LiquidationExecuted(++jobId, msg.sender, len, succeeded, fallbackUsed, nativeReward, musdReward);
     }
 
     /// @notice Emergency escape hatch. Should never be required during normal operation.

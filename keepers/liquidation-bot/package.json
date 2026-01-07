@@ -12,7 +12,8 @@
     "testnet:poll": "tsx scripts/testnet/02_poll_liquidatable.ts",
     "testnet:scan": "tsx scripts/testnet/02_poll_liquidatable.ts --SCAN=true",
     "testnet:run-once": "tsx scripts/testnet/03_run_keeper_once.ts",
-    "testnet:verify": "tsx scripts/testnet/04_verify_post_state.ts"
+    "testnet:verify": "tsx scripts/testnet/04_verify_post_state.ts",
+    "testnet:direct-liquidate": "tsx scripts/testnet/05_direct_trove_manager_liquidate.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

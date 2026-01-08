@@ -57,6 +57,6 @@ notes.txt
 deployments/dev/
 deployments/local/
 
-# Keeper testnet script state (local runtime artifacts)
-# Keep the directory structure + example files in git, ignore runtime state.
+# Keeper script state (local runtime artifacts)
 keepers/liquidation-bot/scripts/testnet/.state/*
+keepers/liquidation-bot/scripts/mainnet/.state/*

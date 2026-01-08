@@ -252,6 +252,7 @@ export async function executeLiquidationJob(params: {
         ok: false;
         reason:
           | 'GAS_CAP'
+          | 'ESTIMATE_REVERT'
           | 'SPEND_CAP'
           | 'FEE_UNAVAILABLE'
           | 'INSUFFICIENT_BALANCE';
@@ -264,7 +265,60 @@ export async function executeLiquidationJob(params: {
   ): Promise<PlanResult> {
     let workingCountLocal = limitCount;
     let borrowers = originalBorrowers.slice(0, workingCountLocal);
-    let rawGas = await estimate(borrowers);
+    let rawGas: bigint = 0n;
+    let rawGasKnown = false;
+    try {
+      rawGas = await estimate(borrowers);
+      rawGasKnown = true;
+    } catch (err) {
+      const classified = classifyError(err);
+      emitJson('job_plan_error', {
+        reason: 'ESTIMATE_REVERT',
+        message: classified.message,
+        errorType: classified.type,
+        borrowersTotal: originalBorrowers.length,
+        attemptedCount: workingCountLocal,
+        borrowers: borrowers,
+        fallbackEnabled: job.fallbackOnFail,
+      });
+      // If batch estimation reverts and fallback is enabled, try smaller batches.
+      if (job.fallbackOnFail && workingCountLocal > 1) {
+        while (workingCountLocal > 1) {
+          const before = workingCountLocal;
+          workingCountLocal = Math.max(1, Math.ceil(workingCountLocal / 2));
+          borrowers = originalBorrowers.slice(0, workingCountLocal);
+          emitJson('job_shrink', {
+            beforeCount: before,
+            afterCount: workingCountLocal,
+            reason: 'ESTIMATE_REVERT',
+          });
+          try {
+            rawGas = await estimate(borrowers);
+            rawGasKnown = true;
+            break;
+          } catch (innerErr) {
+            const innerClassified = classifyError(innerErr);
+            emitJson('job_plan_error', {
+              reason: 'ESTIMATE_REVERT',
+              message: innerClassified.message,
+              errorType: innerClassified.type,
+              borrowersTotal: originalBorrowers.length,
+              attemptedCount: workingCountLocal,
+              borrowers: borrowers,
+              fallbackEnabled: job.fallbackOnFail,
+            });
+            // continue shrinking until 1
+          }
+        }
+        if (!rawGasKnown) {
+          return { ok: false, reason: 'ESTIMATE_REVERT' };
+        }
+      } else {
+        return { ok: false, reason: 'ESTIMATE_REVERT' };
+      }
+    }
+    // Safety guard: should be unreachable, but keeps log schema consistent.
+    if (!rawGasKnown) return { ok: false, reason: 'ESTIMATE_REVERT' };
     let gasEstimate = applyBuffer(rawGas);
 
     if (config.maxGasPerJob !== undefined && config.maxGasPerJob > 0n) {
@@ -272,7 +326,25 @@ export async function executeLiquidationJob(params: {
         const before = workingCountLocal;
         workingCountLocal = Math.max(1, Math.ceil(workingCountLocal / 2));
         borrowers = originalBorrowers.slice(0, workingCountLocal);
-        rawGas = await estimate(borrowers);
+        try {
+          rawGas = await estimate(borrowers);
+        } catch (err) {
+          const classified = classifyError(err);
+          emitJson('job_plan_error', {
+            reason: 'ESTIMATE_REVERT',
+            message: classified.message,
+            errorType: classified.type,
+            borrowersTotal: originalBorrowers.length,
+            attemptedCount: workingCountLocal,
+            borrowers: borrowers,
+            fallbackEnabled: job.fallbackOnFail,
+          });
+          // If fallback is enabled, keep shrinking until we can estimate or hit 1.
+          if (job.fallbackOnFail && workingCountLocal > 1) {
+            continue;
+          }
+          return { ok: false, reason: 'ESTIMATE_REVERT' };
+        }
         gasEstimate = applyBuffer(rawGas);
         emitJson('job_shrink', {
           beforeCount: before,

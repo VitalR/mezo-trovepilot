@@ -42,6 +42,7 @@ export type TestnetStateV1 = {
     attemptedAtMs: number;
     dryRun: boolean;
     forceBorrower?: Address;
+    forceBorrowers?: Address[];
     maxToScan?: number;
     processedBorrowers?: Address[];
     leftoverBorrowers?: Address[];

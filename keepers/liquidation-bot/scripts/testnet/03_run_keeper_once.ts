@@ -7,6 +7,7 @@ import { executeLiquidationJob } from '../../src/core/executor.js';
 import { getCurrentPrice } from '../../src/core/price.js';
 import { log } from '../../src/core/logging.js';
 import { troveManagerAbi } from '../../src/abis/troveManagerAbi.js';
+import { liquidationEngineAbi } from '../../src/abis/liquidationEngineAbi.js';
 import { MCR_ICR } from '../../src/config.js';
 import {
   argBool,
@@ -15,6 +16,7 @@ import {
   assertTestnet,
   initScriptLogContext,
   loadAddressBook,
+  parseAddressList,
   parseArgs,
   requireConfirm,
   scriptPaths,
@@ -63,6 +65,10 @@ async function main() {
     argString(args, 'FORCE_BORROWER') ??
     process.env.FORCE_BORROWER ??
     undefined;
+  const forceBorrowersRaw =
+    argString(args, 'FORCE_BORROWERS') ??
+    process.env.FORCE_BORROWERS ??
+    undefined;
   const maxToScanOverride =
     argNumber(args, 'MAX_TO_SCAN') ??
     (process.env.MAX_TO_SCAN ? Number(process.env.MAX_TO_SCAN) : undefined) ??
@@ -73,6 +79,12 @@ async function main() {
       ? process.env.DRY_RUN.toLowerCase() === 'true'
       : undefined) ??
     undefined;
+  const strictBatch =
+    argBool(args, 'STRICT_BATCH') ??
+    (process.env.STRICT_BATCH
+      ? process.env.STRICT_BATCH.toLowerCase() === 'true'
+      : undefined) ??
+    false;
 
   const book = loadAddressBook();
 
@@ -133,6 +145,255 @@ async function main() {
   }
 
   const spendTracker = { spent: 0n };
+
+  // Deterministic multi-borrower path: FORCE_BORROWERS lets operators specify
+  // the exact borrowers to attempt in one tx (batch), avoiding scan nondeterminism.
+  if (forceBorrowersRaw) {
+    const borrowers = parseAddressList({
+      name: 'FORCE_BORROWERS',
+      raw: forceBorrowersRaw,
+      allowEmpty: false,
+    });
+
+    // Pre-check ICRs at the current price to avoid sending known-bad txs.
+    const checked: Array<{ borrower: Address; icrE18: bigint }> = [];
+    for (const borrower of borrowers) {
+      const icr = (await publicClient.readContract({
+        address: config.troveManager,
+        abi: troveManagerAbi,
+        functionName: 'getCurrentICR',
+        args: [borrower, price],
+      })) as unknown as bigint;
+      checked.push({ borrower, icrE18: icr });
+    }
+
+    const liquidatable = checked
+      .filter((x) => x.icrE18 < MCR_ICR)
+      .map((x) => x.borrower);
+
+    log.jsonInfo('testnet_force_borrowers_precheck', {
+      component: 'testnet',
+      forceBorrowers: borrowers,
+      priceE18: price.toString(),
+      mcrIcrE18: MCR_ICR.toString(),
+      icrs: checked.map((x) => ({
+        borrower: x.borrower,
+        icrE18: x.icrE18.toString(),
+        belowMcr: x.icrE18 < MCR_ICR,
+      })),
+      liquidatableCount: liquidatable.length,
+      strictBatch,
+    });
+
+    if (liquidatable.length === 0) {
+      log.jsonInfo('testnet_run_once_skip', {
+        component: 'testnet',
+        reason: 'NONE_LIQUIDATABLE',
+        forceBorrowers: borrowers,
+        mcrIcrE18: MCR_ICR.toString(),
+        priceE18: price.toString(),
+        icrs: checked.map((x) => ({
+          borrower: x.borrower,
+          icrE18: x.icrE18.toString(),
+        })),
+      });
+      return;
+    }
+
+    // STRICT_BATCH mode: do a best-effort preflight using eth_estimateGas against
+    // the engine entrypoints to surface which borrower(s) cause reverts.
+    if (!config.dryRun && strictBatch) {
+      const recipient = account;
+      const engine = config.liquidationEngine;
+      const singleEstimates: Array<{
+        borrower: Address;
+        ok: boolean;
+        gas?: string;
+        error?: string;
+      }> = [];
+      for (const b of liquidatable) {
+        try {
+          const g = await publicClient.estimateContractGas({
+            address: engine,
+            abi: liquidationEngineAbi,
+            functionName: 'liquidateSingle',
+            args: [b, recipient],
+            account: recipient,
+          });
+          singleEstimates.push({ borrower: b, ok: true, gas: g.toString() });
+        } catch (e) {
+          singleEstimates.push({ borrower: b, ok: false, error: String(e) });
+        }
+      }
+      const estimateBatch = async (borrowers: Address[]) => {
+        try {
+          const g = await publicClient.estimateContractGas({
+            address: engine,
+            abi: liquidationEngineAbi,
+            functionName: 'liquidateBatch',
+            args: [borrowers, recipient],
+            account: recipient,
+          });
+          return { ok: true as const, gas: g.toString() };
+        } catch (e) {
+          return { ok: false as const, error: String(e) };
+        }
+      };
+
+      const batchOrders: Array<{ name: string; borrowers: Address[] }> = [];
+      // As provided (after filtering to liquidatable).
+      batchOrders.push({ name: 'as_provided', borrowers: liquidatable });
+      // For 2 borrowers, explicitly try the swapped order (order can matter in some TM implementations).
+      if (liquidatable.length === 2) {
+        batchOrders.push({
+          name: 'reversed',
+          borrowers: [liquidatable[1]!, liquidatable[0]!],
+        });
+      }
+      // Also try ICR-sorted orders (best-effort; uses the same ICR values already fetched above).
+      const icrMap = new Map<Address, bigint>();
+      for (const x of checked) icrMap.set(x.borrower, x.icrE18);
+      const byIcrAsc = [...liquidatable].sort((a, b) => {
+        const ia = icrMap.get(a) ?? 0n;
+        const ib = icrMap.get(b) ?? 0n;
+        return ia < ib ? -1 : ia > ib ? 1 : 0;
+      });
+      const byIcrDesc = [...byIcrAsc].reverse();
+      batchOrders.push({ name: 'icr_asc', borrowers: byIcrAsc });
+      batchOrders.push({ name: 'icr_desc', borrowers: byIcrDesc });
+
+      const batchEstimates = [];
+      for (const o of batchOrders) {
+        batchEstimates.push({
+          name: o.name,
+          borrowers: o.borrowers,
+          ...(await estimateBatch(o.borrowers)),
+        });
+      }
+
+      const firstOk = batchEstimates.find((b) => b.ok);
+      if (firstOk && firstOk.name !== 'as_provided') {
+        log.jsonWarn('testnet_strict_batch_order_hint', {
+          component: 'testnet',
+          reason: 'BATCH_ONLY_WORKS_IN_ALTERNATE_ORDER',
+          recommendedOrder: firstOk.name,
+          borrowers: firstOk.borrowers,
+        });
+      }
+      log.jsonInfo('testnet_strict_batch_preflight', {
+        component: 'testnet',
+        liquidationEngine: engine,
+        recipient,
+        singles: singleEstimates,
+        batchCandidates: batchEstimates,
+      });
+    }
+
+    const job = { borrowers: liquidatable, fallbackOnFail: !strictBatch };
+    const balBefore =
+      account === ZERO_ADDRESS
+        ? 0n
+        : await publicClient.getBalance({ address: account });
+
+    const { result: execRes, events } = await captureJsonLogs(async () => {
+      return await executeLiquidationJob({
+        publicClient,
+        walletClient,
+        liquidationEngine: config.liquidationEngine,
+        job,
+        dryRun: config.dryRun,
+        config: {
+          maxTxRetries: config.maxTxRetries,
+          maxFeePerGas: config.maxFeePerGas,
+          maxPriorityFeePerGas: config.maxPriorityFeePerGas,
+          maxNativeSpentPerRun: config.maxNativeSpentPerRun,
+          maxGasPerJob: config.maxGasPerJob,
+          gasBufferPct: config.gasBufferPct,
+        },
+        spendTracker,
+      });
+    });
+    if (!config.dryRun && strictBatch) {
+      // In strict mode we require the executor to submit exactly one batch covering all
+      // intended borrowers. If estimation reverts (or the job is shrunk), fail loudly.
+      if (execRes.processedBorrowers.length !== liquidatable.length) {
+        throw new Error(
+          `STRICT_BATCH=true: batch liquidation not executed for full set (expected=${liquidatable.length}, processed=${execRes.processedBorrowers.length}). ` +
+            `This usually means TroveManager.batchLiquidate() would revert (e.g. price moved, a trove is no longer liquidatable, or batch ordering constraints).`
+        );
+      }
+    }
+
+    const balAfter =
+      account === ZERO_ADDRESS
+        ? balBefore
+        : await publicClient.getBalance({ address: account });
+    const delta = balAfter - balBefore;
+
+    const txConfirmed = events.find(
+      (e) => e.event === 'tx_confirmed' && typeof e.hash === 'string'
+    );
+    const txSent = events.find(
+      (e) => e.event === 'tx_sent' && typeof e.hash === 'string'
+    );
+    const txHash = (txConfirmed?.hash ?? txSent?.hash) as
+      | `0x${string}`
+      | undefined;
+
+    const receiptInfo =
+      txConfirmed && typeof txConfirmed === 'object'
+        ? {
+            status: txConfirmed.status ? String(txConfirmed.status) : undefined,
+            gasUsed: txConfirmed.gasUsed
+              ? String(txConfirmed.gasUsed)
+              : undefined,
+            effectiveGasPrice: txConfirmed.effectiveGasPrice
+              ? String(txConfirmed.effectiveGasPrice)
+              : undefined,
+          }
+        : undefined;
+
+    ensureStateDir();
+    const now = Date.now();
+    const next: TestnetStateV1 = {
+      ...state,
+      updatedAtMs: now,
+      addresses: canonicalAddresses,
+      keeper: account === ZERO_ADDRESS ? state.keeper : { address: account },
+      keeperRunOnce: {
+        attemptedAtMs: now,
+        dryRun: Boolean(config.dryRun),
+        forceBorrowers: borrowers,
+        maxToScan: maxToScanOverride,
+        processedBorrowers: execRes.processedBorrowers,
+        leftoverBorrowers: execRes.leftoverBorrowers,
+        txHash,
+        txConfirmed: Boolean(txConfirmed),
+        receipt: receiptInfo,
+        balanceBeforeWei:
+          account === ZERO_ADDRESS ? undefined : balBefore.toString(),
+        balanceAfterWei:
+          account === ZERO_ADDRESS ? undefined : balAfter.toString(),
+        balanceDeltaWei:
+          account === ZERO_ADDRESS ? undefined : delta.toString(),
+      },
+    };
+    const { latest: latestPath } = scriptPaths();
+    const snapshot = writeStateWithHistory({
+      stateFile,
+      latestFile: latestPath,
+      snapshotPrefix: `run_once_${runId}`,
+      data: next,
+    });
+    log.jsonInfo('testnet_state_updated', {
+      component: 'testnet',
+      stateFile,
+      latest: latestPath,
+      snapshot,
+      txHash,
+    });
+    return;
+  }
 
   // Prioritized borrower path: if FORCE_BORROWER is set, try it first deterministically.
   if (forceBorrower) {

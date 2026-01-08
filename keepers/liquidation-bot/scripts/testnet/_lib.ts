@@ -136,6 +136,32 @@ export function requireAddress(name: string, v: unknown): Address {
   return v as Address;
 }
 
+export function parseAddressList(params: {
+  name: string;
+  raw: string | undefined;
+  allowEmpty?: boolean;
+}): Address[] {
+  const { name, raw, allowEmpty = false } = params;
+  if (!raw || raw.trim() === '') return allowEmpty ? [] : [];
+  const parts = raw
+    .split(/[\s,]+/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out: Address[] = [];
+  for (const p of parts) {
+    if (!isAddress(p)) {
+      throw new Error(`Invalid address in ${name}: ${p}`);
+    }
+    if (p === '0x0000000000000000000000000000000000000000') continue;
+    out.push(p as Address);
+  }
+  if (!allowEmpty && out.length === 0) {
+    // Keep error messaging explicit to avoid silent no-ops when users paste bad lists.
+    throw new Error(`No valid addresses provided for ${name}`);
+  }
+  return out;
+}
+
 export type AddressBook = {
   chainId: number;
   network: string;

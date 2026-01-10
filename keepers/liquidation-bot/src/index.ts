@@ -75,9 +75,10 @@ async function main() {
     const res = await executeLiquidationJob({
       publicClient,
       walletClient,
-      liquidationEngine: config.liquidationEngine,
+      trovePilotEngine: config.trovePilotEngine,
       job,
       dryRun: config.dryRun,
+      preferBatch: config.preferBatchLiquidation,
       config: {
         maxTxRetries: config.maxTxRetries,
         minKeeperBalanceWei: config.minKeeperBalanceWei,

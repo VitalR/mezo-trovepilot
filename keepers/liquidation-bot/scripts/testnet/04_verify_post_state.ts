@@ -134,7 +134,7 @@ async function main() {
     });
   }
 
-  // Check 3: LiquidationEngine events in liquidation tx (decoded).
+  // Check 3: TrovePilotEngine (LiquidationExecuted) events in liquidation tx (decoded).
   const engineEvents: Array<Record<string, unknown>> = [];
   const txHash =
     argString(args, 'TX_HASH') ??
@@ -143,7 +143,7 @@ async function main() {
   let liquidationTxConfirmed: boolean = false;
   // Prefer the canonical address book value (CONFIG_PATH), since `.state/latest.json`
   // may contain stale addresses from previous deployments.
-  const engineAddress = book.trovePilot.liquidationEngine as Address;
+  const engineAddress = book.trovePilot.trovePilotEngine as Address;
   if (txHash) {
     try {
       const receipt = await publicClient.waitForTransactionReceipt({
@@ -187,7 +187,7 @@ async function main() {
 
   if (txHash && engineEvents.length === 0) {
     throw new Error(
-      'Unable to decode LiquidationEngine events for this tx. Ensure configs/addresses.testnet.json points to the current LiquidationEngine deployment.'
+      'Unable to decode TrovePilotEngine events for this tx. Ensure configs/addresses.testnet.json points to the current TrovePilotEngine deployment.'
     );
   }
 

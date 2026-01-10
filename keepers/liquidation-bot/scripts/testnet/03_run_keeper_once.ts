@@ -7,7 +7,7 @@ import { executeLiquidationJob } from '../../src/core/executor.js';
 import { getCurrentPrice } from '../../src/core/price.js';
 import { log } from '../../src/core/logging.js';
 import { troveManagerAbi } from '../../src/abis/troveManagerAbi.js';
-import { liquidationEngineAbi } from '../../src/abis/liquidationEngineAbi.js';
+import { trovePilotEngineAbi } from '../../src/abis/trovePilotEngineAbi.js';
 import { MCR_ICR } from '../../src/config.js';
 import {
   argBool,
@@ -108,7 +108,9 @@ async function main() {
     sortedTroves: config.sortedTroves,
     priceFeed: config.priceFeed,
     borrowerOperations: book.mezo.core.borrowerOperations,
-    liquidationEngine: config.liquidationEngine,
+    trovePilotEngine: config.trovePilotEngine,
+    // Backwards compatibility for older state readers:
+    liquidationEngine: config.trovePilotEngine,
     redemptionRouter: book.trovePilot.redemptionRouter,
   };
 
@@ -204,7 +206,7 @@ async function main() {
     // the engine entrypoints to surface which borrower(s) cause reverts.
     if (!config.dryRun && strictBatch) {
       const recipient = account;
-      const engine = config.liquidationEngine;
+      const engine = config.trovePilotEngine;
       const singleEstimates: Array<{
         borrower: Address;
         ok: boolean;
@@ -215,7 +217,7 @@ async function main() {
         try {
           const g = await publicClient.estimateContractGas({
             address: engine,
-            abi: liquidationEngineAbi,
+            abi: trovePilotEngineAbi,
             functionName: 'liquidateSingle',
             args: [b, recipient],
             account: recipient,
@@ -229,7 +231,7 @@ async function main() {
         try {
           const g = await publicClient.estimateContractGas({
             address: engine,
-            abi: liquidationEngineAbi,
+            abi: trovePilotEngineAbi,
             functionName: 'liquidateBatch',
             args: [borrowers, recipient],
             account: recipient,
@@ -282,7 +284,7 @@ async function main() {
       }
       log.jsonInfo('testnet_strict_batch_preflight', {
         component: 'testnet',
-        liquidationEngine: engine,
+        trovePilotEngine: engine,
         recipient,
         singles: singleEstimates,
         batchCandidates: batchEstimates,
@@ -299,7 +301,7 @@ async function main() {
       return await executeLiquidationJob({
         publicClient,
         walletClient,
-        liquidationEngine: config.liquidationEngine,
+        trovePilotEngine: config.trovePilotEngine,
         job,
         dryRun: config.dryRun,
         config: {
@@ -319,7 +321,7 @@ async function main() {
       if (execRes.processedBorrowers.length !== liquidatable.length) {
         throw new Error(
           `STRICT_BATCH=true: batch liquidation not executed for full set (expected=${liquidatable.length}, processed=${execRes.processedBorrowers.length}). ` +
-            `This usually means TroveManager.batchLiquidate() would revert (e.g. price moved, a trove is no longer liquidatable, or batch ordering constraints).`
+            `This usually means TroveManager.batchLiquidateTroves() would revert (e.g. price moved, a trove is no longer liquidatable, or batch ordering constraints).`
         );
       }
     }
@@ -426,7 +428,7 @@ async function main() {
       return await executeLiquidationJob({
         publicClient,
         walletClient,
-        liquidationEngine: config.liquidationEngine,
+        trovePilotEngine: config.trovePilotEngine,
         job,
         dryRun: config.dryRun,
         config: {
@@ -555,7 +557,7 @@ async function main() {
     return await executeLiquidationJob({
       publicClient,
       walletClient,
-      liquidationEngine: config.liquidationEngine,
+      trovePilotEngine: config.trovePilotEngine,
       job,
       dryRun: config.dryRun,
       config: {

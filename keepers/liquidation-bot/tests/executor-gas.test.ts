@@ -43,7 +43,7 @@ describe('executor gas cap', () => {
     const res = await executeLiquidationJob({
       publicClient,
       walletClient,
-      liquidationEngine: LIQ_ENGINE,
+      trovePilotEngine: LIQ_ENGINE,
       job: { borrowers: ['0x1' as Address], fallbackOnFail: true },
       config: {
         maxTxRetries: 0,
@@ -96,7 +96,7 @@ describe('executor gas cap', () => {
     const res = await executeLiquidationJob({
       publicClient,
       walletClient,
-      liquidationEngine: LIQ_ENGINE,
+      trovePilotEngine: LIQ_ENGINE,
       job: {
         borrowers: ['0x1' as Address, '0x2' as Address],
         fallbackOnFail: true,
@@ -151,7 +151,7 @@ describe('executor gas cap', () => {
     const res = await executeLiquidationJob({
       publicClient,
       walletClient,
-      liquidationEngine: LIQ_ENGINE,
+      trovePilotEngine: LIQ_ENGINE,
       job: {
         borrowers: [
           '0x1' as Address,

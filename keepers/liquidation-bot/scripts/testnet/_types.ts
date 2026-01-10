@@ -12,7 +12,16 @@ export type TestnetStateV1 = {
     sortedTroves: Address;
     priceFeed: Address;
     borrowerOperations: Address;
-    liquidationEngine: Address;
+    /**
+     * Canonical unified wrapper address (TrovePilotEngine).
+     * If missing, scripts should fall back to legacy `liquidationEngine`.
+     */
+    trovePilotEngine?: Address;
+    /**
+     * Deprecated legacy name (previous LiquidationEngine address field).
+     * Kept for backwards compatibility with older state files.
+     */
+    liquidationEngine?: Address;
     redemptionRouter?: Address;
   };
 

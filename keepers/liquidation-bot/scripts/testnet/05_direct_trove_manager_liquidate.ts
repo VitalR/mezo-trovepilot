@@ -23,7 +23,7 @@ import type { TestnetStateV1 } from './_types.js';
 /**
  * Experimental script: call TroveManager.liquidate(borrower) directly.
  *
- * This bypasses LiquidationEngine and avoids batchLiquidate/fallback logic so we can
+ * This bypasses TrovePilotEngine and avoids batchLiquidateTroves/fallback logic so we can
  * isolate whether TroveManager itself is reverting.
  *
  * Safety:
@@ -143,7 +143,9 @@ async function main() {
         sortedTroves: config.sortedTroves,
         priceFeed: config.priceFeed,
         borrowerOperations: book.mezo.core.borrowerOperations,
-        liquidationEngine: book.trovePilot.liquidationEngine,
+        trovePilotEngine: book.trovePilot.trovePilotEngine,
+        // Backwards compatibility for older state readers:
+        liquidationEngine: book.trovePilot.trovePilotEngine,
         redemptionRouter: book.trovePilot.redemptionRouter,
       },
     }),

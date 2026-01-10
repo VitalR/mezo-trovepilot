@@ -1,3 +1,5 @@
+// Deprecated: kept for backwards compatibility with older deployments/scripts.
+// New code should import `trovePilotEngineAbi`.
 export const liquidationEngineAbi = [
   {
     type: 'function',

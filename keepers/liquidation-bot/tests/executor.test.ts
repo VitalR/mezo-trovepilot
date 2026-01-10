@@ -42,7 +42,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -86,9 +86,10 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1), addr(2), addr(3)], fallbackOnFail: true },
       dryRun: false,
+      preferBatch: true,
       config: {
         maxTxRetries: 0,
         maxGasPerJob: 90n,
@@ -129,7 +130,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: false },
       dryRun: false,
       config: {
@@ -183,12 +184,13 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: {
         borrowers: [addr(1), addr(2), addr(3), addr(4)],
         fallbackOnFail: true,
       },
       dryRun: false,
+      preferBatch: true,
       config: {
         maxTxRetries: 1,
         maxGasPerJob: 160n,
@@ -223,7 +225,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -269,7 +271,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -297,7 +299,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1), addr(2)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -337,7 +339,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -368,7 +370,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1), addr(2)], fallbackOnFail: false },
       dryRun: false,
       config: {
@@ -397,7 +399,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -431,7 +433,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -467,7 +469,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -525,7 +527,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -576,7 +578,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -659,7 +661,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1), addr(2)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -691,7 +693,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -724,7 +726,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -753,7 +755,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -784,7 +786,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(2)], fallbackOnFail: true },
       dryRun: false,
       config: {
@@ -830,7 +832,7 @@ describe('executor gas handling and splitting', () => {
     const res = await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {

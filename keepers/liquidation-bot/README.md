@@ -1,6 +1,6 @@
 ## Liquidation Keeper (TrovePilot v2)
 
-Minimal off-chain bot that discovers undercollateralized troves on Mezo and executes liquidations via the TrovePilot `LiquidationEngine`.
+Minimal off-chain bot that discovers undercollateralized troves on Mezo and executes liquidations via the unified TrovePilot `TrovePilotEngine`.
 
 ### Setup
 
@@ -21,7 +21,8 @@ npm install
 - Optional gas controls: `MAX_TX_RETRIES`, `MAX_FEE_PER_GAS`, `MAX_PRIORITY_FEE_PER_GAS`, `MAX_NATIVE_SPENT_PER_RUN`, `MAX_GAS_PER_JOB`, `GAS_BUFFER_PCT`
   - Set to blank or `0` to disable caps/overrides (auto fee estimation via `estimateFeesPerGas` is used when unset).
 - Optional balance safety: `MIN_KEEPER_BALANCE_WEI` (skip txs if keeper balance is too low)
-- `TROVE_MANAGER_ADDRESS`, `SORTED_TROVES_ADDRESS`, `LIQUIDATION_ENGINE_ADDRESS`, `PRICE_FEED_ADDRESS`
+- `TROVE_MANAGER_ADDRESS`, `SORTED_TROVES_ADDRESS`, `TROVE_PILOT_ENGINE_ADDRESS`, `PRICE_FEED_ADDRESS`
+- Deprecated alias: `LIQUIDATION_ENGINE_ADDRESS` (kept for older deployments/configs)
 - Optional discovery/price bounds: `MAX_TROVES_TO_SCAN_PER_RUN`, `MAX_TROVES_PER_JOB`, `EARLY_EXIT_SCAN_THRESHOLD`, `MIN_BTC_PRICE`, `MAX_BTC_PRICE`, `MAX_PRICE_AGE_SECONDS`
 - Optional: `DRY_RUN`
 
@@ -75,7 +76,8 @@ Optional address overrides (use only if deployments moved; still gated by testne
 - `SORTED_TROVES_ADDRESS`
 - `TROVE_MANAGER_ADDRESS`
 - `PRICE_FEED_ADDRESS`
-- `LIQUIDATION_ENGINE_ADDRESS`
+- `TROVE_PILOT_ENGINE_ADDRESS` (TrovePilotEngine)
+- Deprecated alias: `LIQUIDATION_ENGINE_ADDRESS`
 
 #### Mezo testnet parameters
 

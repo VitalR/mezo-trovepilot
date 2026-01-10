@@ -237,7 +237,9 @@ async function main() {
       sortedTroves: config.sortedTroves,
       priceFeed: config.priceFeed,
       borrowerOperations: book.mezo.core.borrowerOperations,
-      liquidationEngine: config.liquidationEngine,
+      trovePilotEngine: config.trovePilotEngine,
+      // Backwards compatibility for older state readers:
+      liquidationEngine: config.trovePilotEngine,
       redemptionRouter: book.trovePilot.redemptionRouter,
     },
     keeper: { address: account },

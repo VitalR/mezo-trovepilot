@@ -1,6 +1,6 @@
 import { Account, Address } from 'viem';
 import { PublicClient, WalletClient } from '../clients/mezoClient.js';
-import { liquidationEngineAbi } from '../abis/liquidationEngineAbi.js';
+import { trovePilotEngineAbi } from '../abis/trovePilotEngineAbi.js';
 import { LiquidationJob } from './jobs.js';
 import { log } from './logging.js';
 import { BotConfig } from '../config.js';
@@ -56,9 +56,10 @@ export interface ExecuteResult {
 export async function executeLiquidationJob(params: {
   publicClient: PublicClient;
   walletClient: WalletClient;
-  liquidationEngine: Address;
+  trovePilotEngine: Address;
   job: LiquidationJob;
   dryRun?: boolean;
+  preferBatch?: boolean;
   config: Pick<
     BotConfig,
     | 'maxTxRetries'
@@ -71,8 +72,9 @@ export async function executeLiquidationJob(params: {
   >;
   spendTracker?: { spent: bigint };
 }): Promise<ExecuteResult> {
-  const { publicClient, walletClient, liquidationEngine, job, dryRun, config } =
+  const { publicClient, walletClient, trovePilotEngine, job, dryRun, config } =
     params;
+  const preferBatch = params.preferBatch ?? false;
   const spendTracker = params.spendTracker ?? { spent: 0n };
   const walletAccount: Account | Address | null = walletClient.account ?? null;
   const fromAddress: Address | undefined =
@@ -80,8 +82,18 @@ export async function executeLiquidationJob(params: {
       ? (walletAccount as Account).address
       : (walletAccount as Address | null) ?? undefined;
 
-  const originalBorrowers = [...job.borrowers];
+  // Default (recommended) mode is single-borrower execution for robustness.
+  // In that mode, we intentionally process only the first borrower and return
+  // the remainder as leftovers for the caller to re-queue.
+  const originalBorrowers =
+    !preferBatch && job.borrowers.length > 1
+      ? [job.borrowers[0]!]
+      : [...job.borrowers];
+  const unprocessedSuffix =
+    !preferBatch && job.borrowers.length > 1 ? job.borrowers.slice(1) : [];
   let workingCount = originalBorrowers.length;
+  const requestedCount = job.borrowers.length;
+  const effectiveCount = originalBorrowers.length;
 
   if (dryRun) {
     log.info(
@@ -91,7 +103,7 @@ export async function executeLiquidationJob(params: {
   }
 
   log.info(
-    `Submitting liquidation: count=${job.borrowers.length} fallback=${job.fallbackOnFail}`
+    `Submitting liquidation: requested=${requestedCount} effective=${effectiveCount} preferBatch=${preferBatch} fallback=${job.fallbackOnFail}`
   );
 
   if (!fromAddress) {
@@ -104,20 +116,19 @@ export async function executeLiquidationJob(params: {
   const recipient: Address = fromAddress;
 
   async function estimate(bList: Address[]) {
-    // Prefer liquidateSingle for the common 1-borrower case.
-    // Batch remains available for multi-borrower jobs.
-    if (bList.length === 1) {
+    // Default to liquidateSingle for robustness. Optionally allow batch behind a flag.
+    if (!preferBatch || bList.length === 1) {
       return publicClient.estimateContractGas({
-        address: liquidationEngine,
-        abi: liquidationEngineAbi,
+        address: trovePilotEngine,
+        abi: trovePilotEngineAbi,
         functionName: 'liquidateSingle',
         args: [bList[0]!, recipient],
         account: recipient,
       });
     }
     return publicClient.estimateContractGas({
-      address: liquidationEngine,
-      abi: liquidationEngineAbi,
+      address: trovePilotEngine,
+      abi: trovePilotEngineAbi,
       functionName: 'liquidateBatch',
       args: [bList, recipient],
       account: recipient,
@@ -460,7 +471,10 @@ export async function executeLiquidationJob(params: {
     feeInfo
   );
   if (!initialPlan.ok) {
-    return { processedBorrowers: [], leftoverBorrowers: originalBorrowers };
+    return {
+      processedBorrowers: [],
+      leftoverBorrowers: [...originalBorrowers, ...unprocessedSuffix],
+    };
   }
 
   workingCount = initialPlan.workingCount;
@@ -496,7 +510,7 @@ export async function executeLiquidationJob(params: {
           if (!replan.ok) {
             return {
               processedBorrowers: [],
-              leftoverBorrowers: originalBorrowers,
+              leftoverBorrowers: [...originalBorrowers, ...unprocessedSuffix],
             };
           }
           workingCount = replan.workingCount;
@@ -508,15 +522,17 @@ export async function executeLiquidationJob(params: {
       const borrowersForTx = originalBorrowers.slice(0, workingCount);
 
       const fn =
-        borrowersForTx.length === 1 ? 'liquidateSingle' : 'liquidateBatch';
+        !preferBatch || borrowersForTx.length === 1
+          ? 'liquidateSingle'
+          : 'liquidateBatch';
       const args =
-        borrowersForTx.length === 1
+        !preferBatch || borrowersForTx.length === 1
           ? [borrowersForTx[0]!, recipient]
           : [borrowersForTx, recipient];
 
       const txArgs: Record<string, unknown> = {
-        address: liquidationEngine,
-        abi: liquidationEngineAbi,
+        address: trovePilotEngine,
+        abi: trovePilotEngineAbi,
         functionName: fn,
         args,
         account: (walletAccount ?? null) as Account | Address | null,
@@ -584,7 +600,10 @@ export async function executeLiquidationJob(params: {
       spendTracker.spent += actualCost;
       return {
         processedBorrowers: borrowersForTx,
-        leftoverBorrowers: originalBorrowers.slice(workingCount),
+        leftoverBorrowers: [
+          ...originalBorrowers.slice(workingCount),
+          ...unprocessedSuffix,
+        ],
       };
     } catch (err) {
       lastErr = err;
@@ -615,6 +634,6 @@ export async function executeLiquidationJob(params: {
   if (lastErr) log.error(String(lastErr));
   return {
     processedBorrowers: [],
-    leftoverBorrowers: originalBorrowers,
+    leftoverBorrowers: [...originalBorrowers, ...unprocessedSuffix],
   };
 }

@@ -151,7 +151,11 @@ export type AddressBook = {
     tokens?: { musd?: Address };
     price: { priceFeed: Address };
   };
-  trovePilot: { liquidationEngine: Address; redemptionRouter?: Address };
+  trovePilot: {
+    trovePilotEngine: Address;
+    liquidationEngine?: Address;
+    redemptionRouter?: Address;
+  };
 };
 
 export function resolveDefaultConfigPath(): string {
@@ -183,7 +187,8 @@ export function loadAddressBook(): AddressBook {
   const envSortedTroves = envAddressOrUndef('SORTED_TROVES_ADDRESS');
   const envTroveManager = envAddressOrUndef('TROVE_MANAGER_ADDRESS');
   const envPriceFeed = envAddressOrUndef('PRICE_FEED_ADDRESS');
-  const envLiquidationEngine = envAddressOrUndef('LIQUIDATION_ENGINE_ADDRESS');
+  const envTrovePilotEngine = envAddressOrUndef('TROVE_PILOT_ENGINE_ADDRESS');
+  const envLiquidationEngine = envAddressOrUndef('LIQUIDATION_ENGINE_ADDRESS'); // deprecated alias
 
   return {
     chainId: Number(json.chainId),
@@ -218,10 +223,16 @@ export function loadAddressBook(): AddressBook {
       },
     },
     trovePilot: {
-      liquidationEngine: requireAddress(
-        'trovePilot.liquidationEngine',
-        envLiquidationEngine ?? json.trovePilot?.liquidationEngine
+      trovePilotEngine: requireAddress(
+        'trovePilot.trovePilotEngine',
+        envTrovePilotEngine ??
+          envLiquidationEngine ??
+          json.trovePilot?.trovePilotEngine ??
+          json.trovePilot?.liquidationEngine
       ),
+      liquidationEngine: json.trovePilot?.liquidationEngine
+        ? requireAddress('trovePilot.liquidationEngine', json.trovePilot?.liquidationEngine)
+        : undefined,
       redemptionRouter: json.trovePilot?.redemptionRouter
         ? requireAddress(
             'trovePilot.redemptionRouter',

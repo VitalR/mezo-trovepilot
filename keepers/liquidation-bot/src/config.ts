@@ -12,6 +12,14 @@ function requireEnv(name: string): string {
   return v;
 }
 
+function requireEnvAny(names: string[]): string {
+  for (const n of names) {
+    const v = process.env[n];
+    if (v) return v;
+  }
+  throw new Error(`Missing required env (one of): ${names.join(', ')}`);
+}
+
 // Mezo MCR (ICR threshold) in 1e18 units. Keep in sync with protocol.
 export const MCR_ICR = 1_100_000_000_000_000_000n; // 110% in 1e18
 
@@ -23,8 +31,17 @@ export interface BotConfig {
   minKeeperBalanceWei?: bigint;
   troveManager: Address;
   sortedTroves: Address;
-  liquidationEngine: Address;
+  /**
+   * Canonical unified wrapper address (TrovePilotEngine).
+   * Prefer env `TROVE_PILOT_ENGINE_ADDRESS`; falls back to deprecated `LIQUIDATION_ENGINE_ADDRESS`.
+   */
+  trovePilotEngine: Address;
   priceFeed: Address;
+  /**
+   * If true, the bot will submit `liquidateBatch(...)` for multi-borrower jobs.
+   * Default is false (always use `liquidateSingle(...)` for robustness).
+   */
+  preferBatchLiquidation: boolean;
   maxTxRetries: number;
   maxFeePerGas?: bigint;
   maxPriorityFeePerGas?: bigint;
@@ -76,12 +93,21 @@ export function loadConfig(): BotConfig {
     sortedTroves: (parseOptionalAddressEnv('SORTED_TROVES_ADDRESS') ??
       defaults.sortedTroves ??
       requireEnv('SORTED_TROVES_ADDRESS')) as Address,
-    liquidationEngine: (parseOptionalAddressEnv('LIQUIDATION_ENGINE_ADDRESS') ??
-      defaults.liquidationEngine ??
-      requireEnv('LIQUIDATION_ENGINE_ADDRESS')) as Address,
+    trovePilotEngine: (parseOptionalAddressEnv('TROVE_PILOT_ENGINE_ADDRESS') ??
+      // Deprecated alias:
+      parseOptionalAddressEnv('LIQUIDATION_ENGINE_ADDRESS') ??
+      defaults.trovePilotEngine ??
+      (requireEnvAny([
+        'TROVE_PILOT_ENGINE_ADDRESS',
+        // Deprecated alias:
+        'LIQUIDATION_ENGINE_ADDRESS',
+      ]) as Address)) as Address,
     priceFeed: (parseOptionalAddressEnv('PRICE_FEED_ADDRESS') ??
       defaults.priceFeed ??
       requireEnv('PRICE_FEED_ADDRESS')) as Address,
+    preferBatchLiquidation:
+      (process.env.PREFER_BATCH_LIQUIDATION ?? '').toLowerCase() === 'true' ||
+      (process.env.PREFER_BATCH_LIQUIDATION ?? '') === '1',
     maxTxRetries: Number(process.env.MAX_TX_RETRIES ?? '2'),
     maxFeePerGas: parseOptionalBigIntEnv('MAX_FEE_PER_GAS'),
     maxPriorityFeePerGas: parseOptionalBigIntEnv('MAX_PRIORITY_FEE_PER_GAS'),
@@ -106,7 +132,7 @@ export function loadConfig(): BotConfig {
 type AddressDefaults = Partial<{
   troveManager: Address;
   sortedTroves: Address;
-  liquidationEngine: Address;
+  trovePilotEngine: Address;
   priceFeed: Address;
 }>;
 
@@ -142,7 +168,8 @@ function loadAddressDefaults(): AddressDefaults {
       troveManager: core.troveManager,
       sortedTroves: core.sortedTroves,
       priceFeed: price.priceFeed,
-      liquidationEngine: trovePilot.liquidationEngine,
+      trovePilotEngine:
+        trovePilot.trovePilotEngine ?? trovePilot.liquidationEngine,
     };
   } catch (err) {
     log.warn(`Failed to load CONFIG_PATH ${configPath}: ${String(err)}`);
@@ -154,7 +181,7 @@ function validateConfig(cfg: BotConfig) {
   const addrs: Array<[string, Address]> = [
     ['TROVE_MANAGER_ADDRESS', cfg.troveManager],
     ['SORTED_TROVES_ADDRESS', cfg.sortedTroves],
-    ['LIQUIDATION_ENGINE_ADDRESS', cfg.liquidationEngine],
+    ['TROVE_PILOT_ENGINE_ADDRESS', cfg.trovePilotEngine],
     ['PRICE_FEED_ADDRESS', cfg.priceFeed],
   ];
   for (const [name, addr] of addrs) {

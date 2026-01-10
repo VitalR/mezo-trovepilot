@@ -18,7 +18,7 @@ export const troveManagerAbi = [
   },
   {
     type: 'function',
-    name: 'batchLiquidate',
+    name: 'batchLiquidateTroves',
     stateMutability: 'nonpayable',
     inputs: [{ name: '_borrowers', type: 'address[]' }],
     outputs: [],

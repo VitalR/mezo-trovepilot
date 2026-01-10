@@ -91,7 +91,7 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
     }
 
     /// @notice Batch liquidate provided borrowers.
-    /// @dev Strict semantics: reverts if TroveManager batchLiquidate reverts.
+    /// @dev Strict semantics: reverts if TroveManager batchLiquidateTroves reverts.
     /// @param _borrowers List of troves to liquidate.
     /// @param _recipient Address to receive rewards (native + MUSD). Must be non-zero.
     /// @return succeeded Always equals borrowers.length on success (reverts on failure).
@@ -107,7 +107,7 @@ contract LiquidationEngine is Ownable2Step, ReentrancyGuard {
         uint256 balanceBefore = address(this).balance;
         uint256 musdBefore = MUSD.balanceOf(address(this));
 
-        TROVE_MANAGER.batchLiquidate(_borrowers);
+        TROVE_MANAGER.batchLiquidateTroves(_borrowers);
 
         (uint256 nativeReward, uint256 musdReward) = _forwardRewards(balanceBefore, musdBefore, _recipient);
         emit LiquidationExecuted(++jobId, msg.sender, _recipient, len, len, nativeReward, musdReward);

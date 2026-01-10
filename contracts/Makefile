@@ -31,7 +31,7 @@ CONSTRUCTOR_SIG   ?=
 CONSTRUCTOR_PARAMS?=
 
 # Deploy script & contract names
-DEPLOY_SCRIPT  ?= script/TrovePilotDeploy.s.sol:TrovePilotDeployScript
+DEPLOY_SCRIPT  ?= script/DeployTrovePilotEngine.s.sol:DeployTrovePilotEngineScript
 
 # Test matching (you can override: make test MATCH=MyTestName)
 MATCH          ?=

@@ -11,9 +11,14 @@ import { ISortedTroves } from "../../src/interfaces/ISortedTroves.sol";
 contract MockTroveManager is ITroveManager {
     bool public revertBatch;
     mapping(address => bool) public revertSingle;
+    bool public revertRedeem;
     uint256 public rewardNative;
     uint256 public rewardMUSD;
     MockERC20 public musdToken;
+    uint256 public redeemNativeOut;
+    uint256 public redeemRefund;
+    bool public redeemConfigured;
+    uint256 public redeemExtraMint;
 
     address[] public lastBatch;
     uint256 public singleCalls;
@@ -38,12 +43,28 @@ contract MockTroveManager is ITroveManager {
         rewardMUSD = value;
     }
 
+    function setRedeemBehavior(address token, uint256 nativeOut, uint256 refund) external {
+        musdToken = MockERC20(token);
+        redeemNativeOut = nativeOut;
+        redeemRefund = refund;
+        redeemConfigured = true;
+        redeemExtraMint = 0;
+    }
+
+    function setRedeemExtraMint(uint256 amount) external {
+        redeemExtraMint = amount;
+    }
+
     function setRevertBatch(bool v) external {
         revertBatch = v;
     }
 
     function setRevertSingle(address who, bool v) external {
         revertSingle[who] = v;
+    }
+
+    function setRevertRedeem(bool v) external {
+        revertRedeem = v;
     }
 
     function liquidate(address _borrower) external override {
@@ -58,7 +79,7 @@ contract MockTroveManager is ITroveManager {
         }
     }
 
-    function batchLiquidate(address[] calldata _borrowers) external override {
+    function batchLiquidateTroves(address[] calldata _borrowers) external override {
         lastBatch = _borrowers;
         if (revertBatch) revert("batch revert");
         if (rewardNative != 0) {
@@ -82,6 +103,7 @@ contract MockTroveManager is ITroveManager {
         uint256 _partialRedemptionHintNICR,
         uint256 _maxIterations
     ) external override {
+        if (revertRedeem) revert("redeem revert");
         lastRedeem = RedeemCall({
             amount: _MUSDamount,
             first: _firstRedemptionHint,
@@ -90,6 +112,26 @@ contract MockTroveManager is ITroveManager {
             nicr: _partialRedemptionHintNICR,
             maxIter: _maxIterations
         });
+
+        // Simulate Mezo redemption behavior only when explicitly configured by the test.
+        // Default behavior is "record only" to keep unrelated tests (e.g., RedemptionRouter) deterministic.
+        if (!redeemConfigured) return;
+
+        require(address(musdToken) != address(0), "musdToken unset");
+        require(redeemRefund <= _MUSDamount, "bad refund");
+
+        // - burns some portion of MUSD from msg.sender (the wrapper)
+        // - sends native collateral to msg.sender
+        // - leaves any unused MUSD in msg.sender for the wrapper to refund
+        uint256 burnAmount = _MUSDamount - redeemRefund;
+        if (burnAmount != 0) musdToken.burn(msg.sender, burnAmount);
+        if (redeemNativeOut != 0) {
+            (bool ok,) = payable(msg.sender).call{ value: redeemNativeOut }("");
+            require(ok, "redeem native fail");
+        }
+        if (redeemExtraMint != 0) {
+            musdToken.mint(msg.sender, redeemExtraMint);
+        }
     }
 
     function getLastRedeem() external view returns (RedeemCall memory) {
@@ -134,6 +176,10 @@ contract MockERC20 is ERC20("Mock", "MCK") {
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
+    }
+
+    function burn(address from, uint256 amount) external {
+        _burn(from, amount);
     }
 }
 

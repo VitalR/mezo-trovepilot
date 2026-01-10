@@ -23,4 +23,7 @@ library Errors {
 
     /// @notice Reverts when liquidation reward cannot be forwarded.
     error RewardPayoutFailed();
+
+    /// @notice Reverts when the amount of unused MUSD is greater than the amount requested for redemption.
+    error InvalidRefundAmount();
 }

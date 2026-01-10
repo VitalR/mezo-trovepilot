@@ -26,6 +26,12 @@ contract RedemptionRouter {
         bool hinted
     );
 
+    /// @notice Emitted when the redemption router is initialized.
+    /// @param tm TroveManager proxy address.
+    /// @param hints HintHelpers address.
+    /// @param sorted SortedTroves address.
+    event RedemptionRouterInitialized(address indexed tm, address indexed hints, address indexed sorted);
+
     /// @notice TroveManager proxy used to perform redemptions.
     ITroveManager public immutable TROVE_MANAGER;
     /// @notice HintHelpers contract used to compute redemption hints.
@@ -43,6 +49,8 @@ contract RedemptionRouter {
         TROVE_MANAGER = ITroveManager(_tm);
         HINT_HELPERS = IHintHelpers(_hints);
         SORTED_TROVES = ISortedTroves(_sorted);
+
+        emit RedemptionRouterInitialized(_tm, _hints, _sorted);
     }
 
     /// @notice Quick redemption without hints (higher gas).

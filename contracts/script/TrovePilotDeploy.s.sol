@@ -58,8 +58,8 @@ contract TrovePilotDeployScript is Script {
 
         // // Deploy RedemptionRouter (stateless)
         // deployedRouter = address(
-        //     new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS, MezoAddresses.SORTED_TROVES)
-        // );
+        //     new RedemptionRouter(MezoAddresses.TROVE_MANAGER, MezoAddresses.HINT_HELPERS,
+        // MezoAddresses.SORTED_TROVES) );
 
         // Deploy LiquidationEngine (stateless except jobId; owner = deployer)
         deployedEngine = address(new LiquidationEngine(MezoAddresses.TROVE_MANAGER, MezoAddresses.MUSD));
@@ -81,7 +81,7 @@ contract TrovePilotDeployScript is Script {
 
         AddressesCfg memory cfg = _loadConfig(path);
         cfg.trovePilot.liquidationEngine = deployedEngine;
-        cfg.trovePilot.redemptionRouter = 0xba353C8774EBC4a2eD538B6917f34238b4aE02bA;// deployedRouter;
+        cfg.trovePilot.redemptionRouter = 0xba353C8774EBC4a2eD538B6917f34238b4aE02bA; // deployedRouter;
 
         string memory json = string.concat(
             "{\n",

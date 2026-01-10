@@ -8,7 +8,7 @@ interface ITroveManager {
     function liquidate(address _borrower) external;
 
     /// @notice Batch liquidate provided troves.
-    function batchLiquidate(address[] calldata _borrowers) external;
+    function batchLiquidateTroves(address[] calldata _borrowers) external;
 
     /// @notice Redeem MUSD for collateral using optional hints.
     function redeemCollateral(

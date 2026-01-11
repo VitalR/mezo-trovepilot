@@ -15,7 +15,8 @@ import { Errors } from "./utils/Errors.sol";
 ///      - No on-chain hint computation; callers provide redemption hints.
 ///      - Liquidations are strict: TroveManager reverts are bubbled (no try/catch or fallback loops).
 ///      - Redemptions require atomic custody of MUSD (transferFrom -> redeem -> refund unused) and `receive()` for
-/// native collateral. - All payouts/refunds are forwarded using balance deltas to avoid leaking pre-existing dust.
+/// native collateral.
+///      - All payouts/refunds are forwarded using balance deltas to avoid leaking pre-existing dust.
 ///      - `jobId` is monotonic and increments exactly once per successful external call.
 ///      - `Ownable2Step` gates an emergency escape hatch (`sweep`) only.
 contract TrovePilotEngine is Ownable2Step, ReentrancyGuard {

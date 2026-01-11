@@ -18,7 +18,6 @@
     }
   },
   "trovePilot": {
-    "liquidationEngine": "0x0bf202057A5457169aAb7Ea11916E7818DF11385",
-    "redemptionRouter": "0xba353C8774EBC4a2eD538B6917f34238b4aE02bA"
+    "trovePilotEngine": "0x878a85eaaF24902fD6985d3CB2D51a299E33F43c"
   }
 }

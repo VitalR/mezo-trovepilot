@@ -42,8 +42,7 @@ contract DeployTrovePilotEngineScript is Script {
     }
 
     struct TrovePilotCfg {
-        address liquidationEngine;
-        address redemptionRouter;
+        address trovePilotEngine;
     }
 
     struct AddressesCfg {
@@ -79,7 +78,7 @@ contract DeployTrovePilotEngineScript is Script {
     /// @dev Writes updated trovePilot section to `path`, preserving other fields.
     function _writeManifest(string memory path, address engine) internal {
         AddressesCfg memory cfg = _loadConfig(path);
-        cfg.trovePilot.liquidationEngine = engine;
+        cfg.trovePilot.trovePilotEngine = engine;
 
         string memory json = string.concat(
             "{\n",
@@ -122,11 +121,8 @@ contract DeployTrovePilotEngineScript is Script {
             "    }\n",
             "  },\n",
             '  "trovePilot": {\n',
-            '    "liquidationEngine": "',
-            vm.toString(cfg.trovePilot.liquidationEngine),
-            '",\n',
-            '    "redemptionRouter": "',
-            vm.toString(cfg.trovePilot.redemptionRouter),
+            '    "trovePilotEngine": "',
+            vm.toString(cfg.trovePilot.trovePilotEngine),
             '"\n',
             "  }\n",
             "}\n"
@@ -151,7 +147,7 @@ contract DeployTrovePilotEngineScript is Script {
             skipOracle: MezoAddresses.SKIP_ORACLE,
             pythOracle: MezoAddresses.PYTH_ORACLE
         });
-        cfg.trovePilot = TrovePilotCfg({ liquidationEngine: address(0), redemptionRouter: address(0) });
+        cfg.trovePilot = TrovePilotCfg({ trovePilotEngine: address(0) });
 
         // If file exists, parse and reuse existing fields (best-effort).
         try vm.readFile(path) returns (string memory raw) {
@@ -185,11 +181,11 @@ contract DeployTrovePilotEngineScript is Script {
                 cfg.mezo.price.pythOracle = raw.readAddress(".mezo.price.pythOracle");
             }
 
-            if (raw.keyExists(".trovePilot.liquidationEngine")) {
-                cfg.trovePilot.liquidationEngine = raw.readAddress(".trovePilot.liquidationEngine");
-            }
-            if (raw.keyExists(".trovePilot.redemptionRouter")) {
-                cfg.trovePilot.redemptionRouter = raw.readAddress(".trovePilot.redemptionRouter");
+            if (raw.keyExists(".trovePilot.trovePilotEngine")) {
+                cfg.trovePilot.trovePilotEngine = raw.readAddress(".trovePilot.trovePilotEngine");
+            } else if (raw.keyExists(".trovePilot.liquidationEngine")) {
+                // Backward-compat: older manifests stored the engine under `liquidationEngine`.
+                cfg.trovePilot.trovePilotEngine = raw.readAddress(".trovePilot.liquidationEngine");
             }
         } catch { }
     }

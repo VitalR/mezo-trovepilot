@@ -40,6 +40,7 @@ function parseBoolEnv(name: string, defaultValue: boolean): boolean {
 }
 
 export interface BotConfig {
+  chainId?: number;
   rpcUrl: string;
   privateKey: `0x${string}`;
   unlockedRpcUrl?: string;
@@ -83,6 +84,7 @@ export interface BotConfig {
 }
 
 type AddressDefaults = Partial<{
+  chainId: number;
   trovePilotEngine: Address;
   hintHelpers: Address;
   sortedTroves: Address;
@@ -120,6 +122,7 @@ function loadAddressDefaults(): AddressDefaults {
     const price = mezo.price ?? {};
     const tokens = mezo.tokens ?? {};
     return {
+      chainId: typeof json.chainId === 'number' ? json.chainId : undefined,
       hintHelpers: core.hintHelpers,
       sortedTroves: core.sortedTroves,
       priceFeed: price.priceFeed,
@@ -210,6 +213,7 @@ export function loadConfig(): BotConfig {
   const defaults = loadAddressDefaults();
 
   const cfg: BotConfig = {
+    chainId: defaults.chainId,
     rpcUrl: requireEnv('MEZO_RPC_URL'),
     privateKey: (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`,
     unlockedRpcUrl: process.env.UNLOCKED_RPC_URL,

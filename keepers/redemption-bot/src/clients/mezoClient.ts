@@ -1,4 +1,10 @@
-import { Address, createPublicClient, createWalletClient, http } from 'viem';
+import {
+  Address,
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  http,
+} from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { BotConfig } from '../config.js';
 
@@ -6,7 +12,20 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
 
 export function buildClients(config: BotConfig) {
   const publicTransport = http(config.rpcUrl);
-  const publicClient = createPublicClient({ transport: publicTransport });
+  const chain =
+    config.chainId !== undefined
+      ? defineChain({
+          id: config.chainId,
+          name: process.env.NETWORK ?? 'mezo',
+          nativeCurrency: { name: 'BTC', symbol: 'BTC', decimals: 18 },
+          rpcUrls: {
+            default: {
+              http: [config.rpcUrl].filter((u) => u && u.length > 0),
+            },
+          },
+        })
+      : undefined;
+  const publicClient = createPublicClient({ transport: publicTransport, chain });
 
   // MVP signer approach:
   // - Default: local hot key (KEEPER_PRIVATE_KEY).
@@ -16,6 +35,7 @@ export function buildClients(config: BotConfig) {
     const acct = privateKeyToAccount(config.privateKey);
     const walletClient = createWalletClient({
       transport: publicTransport,
+      chain,
       account: acct,
     });
     return { publicClient, walletClient, account: acct.address as Address };
@@ -28,6 +48,7 @@ export function buildClients(config: BotConfig) {
     };
     const walletClient = createWalletClient({
       transport: http(config.unlockedRpcUrl),
+      chain,
       account: unlockedAccount,
     });
     return { publicClient, walletClient, account: unlockedAccount.address };
@@ -38,6 +59,7 @@ export function buildClients(config: BotConfig) {
   if (config.dryRun) {
     const walletClient = createWalletClient({
       transport: publicTransport,
+      chain,
     });
     return {
       publicClient,

@@ -200,6 +200,8 @@ async function main() {
   state.redeemOnce = {
     attemptedAtMs: nowMs,
     dryRun: config.dryRun,
+    hintFallbackUsed: res.ok ? res.hintFallbackUsed : undefined,
+    calldataUsed: res.ok ? res.calldataUsed : undefined,
     recipient: res.ok ? res.recipient : recipient,
     txHash: res.ok ? res.txHash : undefined,
     txConfirmed: res.ok ? true : undefined,

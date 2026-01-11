@@ -132,7 +132,6 @@ describe('executor (redemption)', () => {
     expect(res.ok).toBe(true);
     expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
     const call = walletClient.writeContract.mock.calls[0][0];
-    expect(call.account.toLowerCase()).toBe(caller.toLowerCase());
     expect(call.functionName).toBe('redeemHintedTo');
     expect(res.ok ? res.caller.toLowerCase() : '').toBe(caller.toLowerCase());
     expect(res.ok ? res.recipient.toLowerCase() : '').toBe(
@@ -232,15 +231,9 @@ describe('executor (redemption)', () => {
     expect(walletClient.writeContract.mock.calls[0][0].functionName).toBe(
       'approve'
     );
-    expect(
-      walletClient.writeContract.mock.calls[0][0].account.toLowerCase()
-    ).toBe(caller.toLowerCase());
     expect(walletClient.writeContract.mock.calls[1][0].functionName).toBe(
       'redeemHintedTo'
     );
-    expect(
-      walletClient.writeContract.mock.calls[1][0].account.toLowerCase()
-    ).toBe(caller.toLowerCase());
     expect(publicClient.waitForTransactionReceipt).toHaveBeenCalledTimes(2);
     expect(publicClient.waitForTransactionReceipt.mock.calls[0][0].hash).toBe(
       '0xapprove'
@@ -696,5 +689,175 @@ describe('executor (redemption)', () => {
     expect(res.ok).toBe(false);
     expect(res.ok ? undefined : res.reason).toBe('FEE_UNAVAILABLE');
     expect(walletClient.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('ESTIMATE_REVERT with "TroveManager: Unable to redeem any amount" triggers deterministic fallback and succeeds', async () => {
+    const { publicClient, walletClient, caller } = makeClients({
+      caller: addr(999),
+    });
+    const engine = addr(2);
+
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // allowance ok
+    let phase = 0;
+    publicClient.readContract.mockImplementation(({ functionName }: any) => {
+      if (functionName === 'allowance') return 10_000_000n;
+      if (functionName === 'balanceOf') return phase === 0 ? 2_000n : 1_900n;
+      throw new Error(`unexpected ${functionName}`);
+    });
+    publicClient.getBalance.mockResolvedValue(10_000_000n);
+
+    // legacy fees
+    publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));
+    publicClient.getGasPrice.mockResolvedValue(1n);
+
+    // hinted estimate reverts, fallback estimate succeeds
+    publicClient.estimateContractGas
+      .mockImplementationOnce((_args: any) => {
+        throw new Error(
+          'ContractFunctionExecutionError: Execution reverted with reason: rpc error: code = Unknown desc = execution reverted: TroveManager: Unable to redeem any amount.'
+        );
+      })
+      .mockResolvedValueOnce(10n);
+
+    walletClient.writeContract.mockResolvedValue('0xtxhash');
+    publicClient.waitForTransactionReceipt.mockImplementation(async () => {
+      phase = 1;
+      return {
+        status: 'success',
+        gasUsed: 10n,
+        effectiveGasPrice: 1n,
+        logs: [],
+      };
+    });
+
+    const res = await executeRedeemOnce({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      config: {
+        musd: addr(1),
+        trovePilotEngine: engine,
+        dryRun: false,
+        autoApprove: false,
+        approveExact: true,
+        maxTxRetries: 0,
+        minKeeperBalanceWei: undefined,
+        maxFeePerGas: undefined,
+        maxPriorityFeePerGas: undefined,
+        maxNativeSpentPerRun: 0n,
+        maxGasPerTx: 1_000_000n,
+        gasBufferPct: 0,
+      },
+      plan: {
+        ok: true,
+        requestedMusd: 100n,
+        truncatedMusd: 100n,
+        effectiveMusd: 100n,
+        maxIterations: 50,
+        recipient: caller,
+        strictTruncation: false,
+      },
+      hints: baseHints as any,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.ok ? res.hintFallbackUsed : false).toBe(true);
+
+    // two estimate attempts: hinted then fallback
+    expect(publicClient.estimateContractGas).toHaveBeenCalledTimes(2);
+
+    // tx uses fallback args
+    expect(walletClient.writeContract).toHaveBeenCalledTimes(1);
+    const call = walletClient.writeContract.mock.calls[0][0];
+    expect(call.address).toBe(engine);
+    expect(call.functionName).toBe('redeemHintedTo');
+    const args = call.args as any[];
+    expect(args[2]).toBe('0x0000000000000000000000000000000000000000');
+    expect(args[3]).toBe(engine);
+    expect(args[4]).toBe(engine);
+    expect(args[5]).toBe(1100000000000000000000n);
+    expect(args[6]).toBe(0n);
+
+    // log evidence
+    const jsonLines = consoleLogSpy.mock.calls
+      .map((c) => c[0])
+      .filter((x) => typeof x === 'string' && (x as string).startsWith('{'))
+      .map((s) => JSON.parse(s as string));
+    expect(
+      jsonLines.some((j) => j.event === 'job_plan_hint_failed_try_fallback')
+    ).toBe(true);
+
+    consoleLogSpy.mockRestore();
+  });
+
+  it('fallback also fails -> returns ESTIMATE_REVERT and sends no tx', async () => {
+    const { publicClient, walletClient } = makeClients({ caller: addr(999) });
+
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    publicClient.readContract.mockImplementation(({ functionName }: any) => {
+      if (functionName === 'allowance') return 10_000_000n;
+      if (functionName === 'balanceOf') return 0n;
+      throw new Error(`unexpected ${functionName}`);
+    });
+    publicClient.getBalance.mockResolvedValue(10_000_000n);
+    publicClient.estimateFeesPerGas.mockRejectedValue(new Error('no eip1559'));
+    publicClient.getGasPrice.mockResolvedValue(1n);
+
+    publicClient.estimateContractGas
+      .mockImplementationOnce(() => {
+        throw new Error(
+          'execution reverted: TroveManager: Unable to redeem any amount'
+        );
+      })
+      .mockImplementationOnce(() => {
+        throw new Error(
+          'execution reverted: TroveManager: Unable to redeem any amount'
+        );
+      });
+
+    const res = await executeRedeemOnce({
+      publicClient: publicClient as any,
+      walletClient: walletClient as any,
+      config: {
+        musd: addr(1),
+        trovePilotEngine: addr(2),
+        dryRun: false,
+        autoApprove: false,
+        approveExact: true,
+        maxTxRetries: 0,
+        minKeeperBalanceWei: undefined,
+        maxFeePerGas: undefined,
+        maxPriorityFeePerGas: undefined,
+        maxNativeSpentPerRun: 0n,
+        maxGasPerTx: 1_000_000n,
+        gasBufferPct: 0,
+      },
+      plan: {
+        ok: true,
+        requestedMusd: 100n,
+        truncatedMusd: 100n,
+        effectiveMusd: 100n,
+        maxIterations: 50,
+        recipient: addr(999),
+        strictTruncation: false,
+      },
+      hints: baseHints as any,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.ok ? undefined : res.reason).toBe('ESTIMATE_REVERT');
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
+
+    const jsonLines = consoleLogSpy.mock.calls
+      .map((c) => c[0])
+      .filter((x) => typeof x === 'string' && (x as string).startsWith('{'))
+      .map((s) => JSON.parse(s as string));
+    expect(
+      jsonLines.some((j) => j.event === 'job_plan_hint_failed_try_fallback')
+    ).toBe(true);
+
+    consoleLogSpy.mockRestore();
   });
 });

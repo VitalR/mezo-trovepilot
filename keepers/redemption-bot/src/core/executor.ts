@@ -8,6 +8,8 @@ import { HintBundle } from './hinting.js';
 import { RedeemPlan } from './strategy.js';
 
 const MAX_UINT256 = (1n << 256n) - 1n;
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
+const FALLBACK_PARTIAL_NICR = 1100000000000000000000n; // 1100e18
 
 type FeeInfo =
   | {
@@ -50,6 +52,12 @@ export function classifyError(err: unknown): {
     return { type: 'underpriced', message: msg };
   }
   return { type: 'transient', message: msg };
+}
+
+function isUnableToRedeemRevert(msg: string): boolean {
+  return msg
+    .toLowerCase()
+    .includes('trovemanager: unable to redeem any amount');
 }
 
 function computeBackoffMs(attemptNumber: number) {
@@ -191,6 +199,16 @@ export type ExecuteRedeemResult =
   | {
       ok: true;
       txHash: `0x${string}`;
+      hintFallbackUsed: boolean;
+      calldataUsed: {
+        musdAmount: string;
+        recipient: Address;
+        firstHint: Address;
+        upperHint: Address;
+        lowerHint: Address;
+        partialNICR: string;
+        maxIter: string;
+      };
       receipt: {
         status?: string;
         blockNumber?: string;
@@ -229,6 +247,7 @@ export type ExecuteRedeemResult =
         | 'GAS_CAP'
         | 'INSUFFICIENT_BALANCE'
         | 'TX_FAILED';
+      hintFallbackUsed?: boolean;
       errorType?: string;
       message?: string;
     };
@@ -362,7 +381,6 @@ export async function executeRedeemOnce(params: {
       abi: musdAbi,
       functionName: 'approve',
       args: [config.trovePilotEngine, approveAmount],
-      account: caller,
       ...(approveGas ? { gas: approveGas } : {}),
     };
     const approveHash = (await walletClient.writeContract(
@@ -410,9 +428,23 @@ export async function executeRedeemOnce(params: {
           | 'FEE_UNAVAILABLE'
           | 'INSUFFICIENT_BALANCE'
           | 'ESTIMATE_REVERT';
+        errorType?: string;
+        message?: string;
       };
 
-  const planTx = async (fee: FeeInfo): Promise<PlanResult> => {
+  type RedeemArgs = {
+    firstHint: Address;
+    upperHint: Address;
+    lowerHint: Address;
+    partialNICR: bigint;
+    maxIter: bigint;
+  };
+
+  const planTx = async (
+    fee: FeeInfo,
+    redeemArgs: RedeemArgs,
+    meta: { hintFallbackUsed: boolean }
+  ): Promise<PlanResult> => {
     let rawGas: bigint;
     try {
       rawGas = await publicClient.estimateContractGas({
@@ -422,24 +454,22 @@ export async function executeRedeemOnce(params: {
         args: [
           plan.effectiveMusd,
           recipient,
-          hints.firstHint,
-          hints.upperHint,
-          hints.lowerHint,
-          hints.partialNICR,
-          BigInt(plan.maxIterations),
+          redeemArgs.firstHint,
+          redeemArgs.upperHint,
+          redeemArgs.lowerHint,
+          redeemArgs.partialNICR,
+          redeemArgs.maxIter,
         ],
         account: caller,
       } as const);
     } catch (err) {
       const c = classifyError(err);
-      emitJson('job_plan_error', {
+      return {
+        ok: false,
         reason: 'ESTIMATE_REVERT',
         errorType: c.type,
         message: c.message,
-        caller,
-        recipient,
-      });
-      return { ok: false, reason: 'ESTIMATE_REVERT' };
+      };
     }
 
     const gasEstimate = applyBuffer(rawGas);
@@ -518,6 +548,7 @@ export async function executeRedeemOnce(params: {
     emitJson('job_plan', {
       caller,
       recipient,
+      hintFallbackUsed: meta.hintFallbackUsed,
       gasEstimateRaw: rawGas.toString(),
       gasBuffered: gasEstimate.toString(),
       estimatedCost: estimatedCost?.toString(),
@@ -530,9 +561,75 @@ export async function executeRedeemOnce(params: {
     return { ok: true, gasEstimate, estimatedCost };
   };
 
-  let initialPlan = await planTx(feeInfo);
+  let hintFallbackUsed = false;
+  const hintedArgs: RedeemArgs = {
+    firstHint: hints.firstHint,
+    upperHint: hints.upperHint,
+    lowerHint: hints.lowerHint,
+    partialNICR: hints.partialNICR,
+    maxIter: BigInt(plan.maxIterations),
+  };
+  const fallbackArgs: RedeemArgs = {
+    firstHint: ZERO_ADDRESS,
+    upperHint: config.trovePilotEngine,
+    lowerHint: config.trovePilotEngine,
+    partialNICR: FALLBACK_PARTIAL_NICR,
+    maxIter: 0n,
+  };
+  let redeemArgs: RedeemArgs = hintedArgs;
+
+  const truncateMsg = (s: string, max = 360) =>
+    s.length > max ? `${s.slice(0, max)}…` : s;
+
+  let initialPlan = await planTx(feeInfo, redeemArgs, { hintFallbackUsed });
   if (!initialPlan.ok) {
-    return { ok: false, reason: initialPlan.reason as any };
+    const msg = String(initialPlan.message ?? '');
+    const isUnableToRedeem =
+      initialPlan.reason === 'ESTIMATE_REVERT' &&
+      initialPlan.errorType === 'logic' &&
+      isUnableToRedeemRevert(msg);
+    if (isUnableToRedeem) {
+      emitJson('job_plan_hint_failed_try_fallback', {
+        caller,
+        recipient,
+        redeemHintFallbackUsed: true,
+        originalError: truncateMsg(msg),
+        hintedArgs: {
+          firstHint: hintedArgs.firstHint,
+          upperHint: hintedArgs.upperHint,
+          lowerHint: hintedArgs.lowerHint,
+          partialNICR: hintedArgs.partialNICR.toString(),
+          maxIter: hintedArgs.maxIter.toString(),
+        },
+        fallbackArgs: {
+          firstHint: fallbackArgs.firstHint,
+          upperHint: fallbackArgs.upperHint,
+          lowerHint: fallbackArgs.lowerHint,
+          partialNICR: fallbackArgs.partialNICR.toString(),
+          maxIter: fallbackArgs.maxIter.toString(),
+        },
+      });
+      redeemArgs = fallbackArgs;
+      hintFallbackUsed = true;
+      initialPlan = await planTx(feeInfo, redeemArgs, { hintFallbackUsed });
+    }
+    if (!initialPlan.ok) {
+      emitJson('job_plan_error', {
+        reason: initialPlan.reason,
+        errorType: initialPlan.errorType,
+        message: initialPlan.message,
+        caller,
+        recipient,
+        hintFallbackUsed,
+      });
+      return {
+        ok: false,
+        reason: initialPlan.reason as any,
+        errorType: initialPlan.errorType,
+        message: initialPlan.message,
+        hintFallbackUsed,
+      };
+    }
   }
   // Keep gasEstimate in a separate variable (narrowing `initialPlan` through retries is awkward).
   let gasEstimate: bigint = initialPlan.gasEstimate;
@@ -566,9 +663,23 @@ export async function executeRedeemOnce(params: {
               maxPriorityFeePerGas: config.maxPriorityFeePerGas,
             },
           });
-          initialPlan = await planTx(feeInfo);
+          initialPlan = await planTx(feeInfo, redeemArgs, { hintFallbackUsed });
           if (!initialPlan.ok) {
-            return { ok: false, reason: initialPlan.reason as any };
+            emitJson('job_plan_error', {
+              reason: initialPlan.reason,
+              errorType: initialPlan.errorType,
+              message: initialPlan.message,
+              caller,
+              recipient,
+              hintFallbackUsed,
+            });
+            return {
+              ok: false,
+              reason: initialPlan.reason as any,
+              errorType: initialPlan.errorType,
+              message: initialPlan.message,
+              hintFallbackUsed,
+            };
           }
           gasEstimate = initialPlan.gasEstimate;
         }
@@ -578,16 +689,17 @@ export async function executeRedeemOnce(params: {
         attemptNumber: attempt,
         caller,
         recipient,
+        hintFallbackUsed,
         to: config.trovePilotEngine,
         functionName: 'redeemHintedTo',
         args: {
           musdAmount: plan.effectiveMusd.toString(),
           recipient,
-          firstHint: hints.firstHint,
-          upperHint: hints.upperHint,
-          lowerHint: hints.lowerHint,
-          partialNICR: hints.partialNICR.toString(),
-          maxIter: String(plan.maxIterations),
+          firstHint: redeemArgs.firstHint,
+          upperHint: redeemArgs.upperHint,
+          lowerHint: redeemArgs.lowerHint,
+          partialNICR: redeemArgs.partialNICR.toString(),
+          maxIter: redeemArgs.maxIter.toString(),
         },
         fee: buildFeeFields(feeInfo),
         gas: gasEstimate.toString(),
@@ -611,13 +723,12 @@ export async function executeRedeemOnce(params: {
         args: [
           plan.effectiveMusd,
           recipient,
-          hints.firstHint,
-          hints.upperHint,
-          hints.lowerHint,
-          hints.partialNICR,
-          BigInt(plan.maxIterations),
+          redeemArgs.firstHint,
+          redeemArgs.upperHint,
+          redeemArgs.lowerHint,
+          redeemArgs.partialNICR,
+          redeemArgs.maxIter,
         ],
-        account: caller,
         gas: gasEstimate,
         ...feeOverrides,
       };
@@ -641,6 +752,7 @@ export async function executeRedeemOnce(params: {
           ok: false,
           reason: 'TX_FAILED',
           message: 'receipt_status_failed',
+          hintFallbackUsed,
         };
       }
 
@@ -730,6 +842,16 @@ export async function executeRedeemOnce(params: {
         txHash,
         caller,
         recipient,
+        hintFallbackUsed,
+        calldataUsed: {
+          musdAmount: plan.effectiveMusd.toString(),
+          recipient,
+          firstHint: redeemArgs.firstHint,
+          upperHint: redeemArgs.upperHint,
+          lowerHint: redeemArgs.lowerHint,
+          partialNICR: redeemArgs.partialNICR.toString(),
+          maxIter: redeemArgs.maxIter.toString(),
+        },
         requestedMusd: plan.requestedMusd.toString(),
         truncatedMusd: plan.truncatedMusd.toString(),
         effectiveMusd: plan.effectiveMusd.toString(),
@@ -744,6 +866,16 @@ export async function executeRedeemOnce(params: {
       return {
         ok: true,
         txHash,
+        hintFallbackUsed,
+        calldataUsed: {
+          musdAmount: plan.effectiveMusd.toString(),
+          recipient,
+          firstHint: redeemArgs.firstHint,
+          upperHint: redeemArgs.upperHint,
+          lowerHint: redeemArgs.lowerHint,
+          partialNICR: redeemArgs.partialNICR.toString(),
+          maxIter: redeemArgs.maxIter.toString(),
+        },
         receipt: {
           status: receipt.status,
           blockNumber: receipt.blockNumber?.toString(),

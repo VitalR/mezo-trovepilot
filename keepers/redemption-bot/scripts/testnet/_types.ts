@@ -84,6 +84,16 @@ export type TestnetStateV1 = {
     dryRun: boolean;
     txHash?: `0x${string}`;
     txConfirmed?: boolean;
+    hintFallbackUsed?: boolean;
+    calldataUsed?: {
+      musdAmount: string;
+      recipient: Address;
+      firstHint: Address;
+      upperHint: Address;
+      lowerHint: Address;
+      partialNICR: string;
+      maxIter: string;
+    };
     receipt?: {
       status?: string;
       blockNumber?: string;

@@ -124,7 +124,6 @@ async function main() {
       abi: musdAbi,
       functionName: 'approve',
       args: [spender, approveAmount],
-      account: caller,
     } as any)) as `0x${string}`;
 
     const receipt = await publicClient.waitForTransactionReceipt({

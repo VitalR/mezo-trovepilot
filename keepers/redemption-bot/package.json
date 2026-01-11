@@ -1,0 +1,27 @@
+{
+  "name": "@trovepilot/redemption-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "lint": "echo \"TODO: add lint\"",
+    "test": "vitest run",
+    "testnet:prepare-allowance": "tsx scripts/testnet/01_prepare_allowance.ts",
+    "testnet:quote": "tsx scripts/testnet/02_quote_redeem.ts",
+    "testnet:redeem-once": "tsx scripts/testnet/03_redeem_once.ts",
+    "testnet:verify": "tsx scripts/testnet/04_verify_post_state.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "viem": "^2.9.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.3.3",
+    "vitest": "^1.3.1"
+  }
+}

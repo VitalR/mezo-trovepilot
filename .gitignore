@@ -60,6 +60,8 @@ deployments/local/
 # Keeper script state (local runtime artifacts)
 keepers/liquidation-bot/scripts/testnet/.state/*
 keepers/liquidation-bot/scripts/mainnet/.state/*
+keepers/redemption-bot/scripts/testnet/.state/*
 
 # Keeper build output (should not be committed)
 keepers/liquidation-bot/dist/
+keepers/redemption-bot/dist/

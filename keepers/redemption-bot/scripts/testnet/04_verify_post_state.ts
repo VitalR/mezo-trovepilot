@@ -14,6 +14,7 @@ import {
   requireEnv,
   scriptPaths,
   readJsonFile,
+  writeStateWithHistory,
 } from './_lib.js';
 import { TestnetStateV1 } from './_types.js';
 
@@ -41,7 +42,7 @@ async function main() {
     state.redeemOnce?.caller ??
     state.actors?.caller ??
     state.keeper?.address;
-  const caller =
+  const callerParsed =
     callerRaw && isAddress(callerRaw) ? (callerRaw as Address) : undefined;
 
   const recipientRaw =
@@ -56,6 +57,8 @@ async function main() {
     );
   }
   const recipient = recipientRaw as Address;
+  // Keep actors deterministic for auditability.
+  const caller: Address = callerParsed ?? recipient;
 
   const price = await getCurrentPrice({
     client: publicClient as unknown as KeeperPublicClient,
@@ -188,22 +191,50 @@ async function main() {
   }
 
   let allowanceCallerToEngine: string | undefined;
-  if (caller) {
-    try {
-      const a = (await publicClient.readContract({
-        address: musdAddress,
-        abi: musdAbi,
-        functionName: 'allowance',
-        args: [caller, engineAddress],
-      } as const)) as unknown as bigint;
-      allowanceCallerToEngine = a.toString();
-    } catch (err) {
-      log.jsonWarnWithError('testnet_verify_allowance_failed', err, {
-        component: 'testnet',
-        caller,
-        engineAddress,
-      });
-    }
+  try {
+    const a = (await publicClient.readContract({
+      address: musdAddress,
+      abi: musdAbi,
+      functionName: 'allowance',
+      args: [caller, engineAddress],
+    } as const)) as unknown as bigint;
+    allowanceCallerToEngine = a.toString();
+  } catch (err) {
+    log.jsonWarnWithError('testnet_verify_allowance_failed', err, {
+      component: 'testnet',
+      caller,
+      engineAddress,
+    });
+  }
+
+  // Persist the live allowance back into state for auditability (best-effort).
+  if (allowanceCallerToEngine !== undefined) {
+    const nowMs = Date.now();
+    const requiredWei =
+      state.quote?.effectiveMusd ?? state.allowance?.requiredWei ?? '0';
+    state.updatedAtMs = nowMs;
+    state.actors = { caller, recipient };
+    state.allowance = {
+      ...(state.allowance ?? {
+        checkedAtMs: nowMs,
+        owner: caller,
+        spender: engineAddress,
+        allowanceWei: allowanceCallerToEngine,
+        requiredWei,
+      }),
+      checkedAtMs: nowMs,
+      caller,
+      owner: caller,
+      spender: engineAddress,
+      allowanceWei: allowanceCallerToEngine,
+      requiredWei,
+    };
+    writeStateWithHistory({
+      stateFile,
+      latestFile: latest,
+      snapshotPrefix: 'testnet_verify',
+      data: state,
+    });
   }
 
   log.jsonInfo('testnet_verify_summary', {

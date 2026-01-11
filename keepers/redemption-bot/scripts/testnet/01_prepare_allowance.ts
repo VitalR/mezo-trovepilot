@@ -129,13 +129,34 @@ async function main() {
     const receipt = await publicClient.waitForTransactionReceipt({
       hash: txHash,
     });
-    state.updatedAtMs = Date.now();
+
+    // Re-read allowance after approval so state snapshots reflect live chain state.
+    const approvedAtMs = Date.now();
+    let allowanceAfter: bigint = allowance;
+    if (receipt.status === 'success') {
+      try {
+        allowanceAfter = (await publicClient.readContract({
+          address: book.mezo.tokens.musd,
+          abi: musdAbi,
+          functionName: 'allowance',
+          args: [caller, spender],
+        } as const)) as unknown as bigint;
+      } catch (err) {
+        log.jsonWarnWithError('approve_allowance_refresh_failed', err, {
+          component: 'testnet',
+          caller,
+          spender,
+        });
+      }
+    }
+
+    state.updatedAtMs = approvedAtMs;
     state.allowance = {
-      checkedAtMs: nowMs,
+      checkedAtMs: approvedAtMs,
       caller,
       owner: caller,
       spender,
-      allowanceWei: allowance.toString(),
+      allowanceWei: allowanceAfter.toString(),
       requiredWei: required.toString(),
       approveTxHash: txHash,
       approveConfirmed: receipt.status === 'success',
@@ -156,6 +177,7 @@ async function main() {
       component: 'testnet',
       txHash,
       status: receipt.status,
+      allowanceAfter: allowanceAfter.toString(),
     });
   }
 }

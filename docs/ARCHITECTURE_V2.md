@@ -39,10 +39,13 @@ TroveManager + Mezo Core (liq/redemption)
 
 ### 2.1 On-Chain Execution Primitives (TrovePilot Contracts)
 
+> **Note:** This document originally referenced legacy wrapper names (`LiquidationEngine`, `RedemptionRouter`).
+> Those contracts have been removed from the repo and their responsibilities are now consolidated into the unified
+> `TrovePilotEngine`. When you see those legacy names below, read them as `TrovePilotEngine`.
+
 | Contract                                         | Responsibility                                                                                                                                                |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **LiquidationEngine**                            | Batch or per-trove liquidation wrapper — executes liquidation of under-collateralized troves. Emits job events for external tracking.                         |
-| **RedemptionRouter**                             | Simplifies redemption flows. Exposes both “quick” (no hints) and “hinted” redemption for gas-efficient calls.                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| **TrovePilotEngine**                             | Unified, permissionless wrapper for Mezo liquidations + hinted redemptions with explicit `recipient` forwarding and structured events (`jobId`).              |     |
 | **RedemptionLoopExecutor**                       | Executes redemption-loop workflows: swap → redeem → optional rebalance. Enables arbitrage/redemption-loop strategies leveraging liquidity (e.g., via Tigris). |
 | **DexAdapter_Tigris** (and future adapter slots) | Minimal wrapper over external DEX / AMM (currently Tigris), for swap operations invoked by bots or loops.                                                     |
 

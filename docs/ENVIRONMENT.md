@@ -6,24 +6,24 @@ This guide lists the environment variables required to run the demo scripts and 
 
 These variables are consumed by the Foundry scripts (`TrovePilotDeploy.s.sol`, `TrovePilotDemo.s.sol`, `TroveHintDump.s.sol`).
 
-| Key | Required | Description |
-| --- | --- | --- |
-| `MEZO_RPC` | ✅ | Mezo testnet RPC URL. Used when running scripts with `--rpc-url $MEZO_RPC`. |
-| `DEPLOYER_PRIVATE_KEY` | ✅ (deploy/demo) | Hex-encoded private key used to sign transactions. |
-| `DEPLOY_REGISTRY` | ▫️ | When `true`, deploy `KeeperRegistry` alongside the core suite. |
-| `AUTHORIZERS` | ▫️ | Comma-separated addresses granted as LiquidationEngine authorizers during deployment. |
-| `DEMO_REDEEM_AMOUNT` | ▫️ | Redemption amount (wei) for `TrovePilotDemo`. Defaults to `10e18`. |
-| `DEMO_MAX_ITER` | ▫️ | `VaultManager` max iterations hint. Defaults to `5`. |
-| `DEMO_KEEPER_FEE_BPS` | ▫️ | Keeper fee basis points (uint16). Defaults to `100` (1%). |
-| `DEMO_ENGINE_FUND` | ▫️ | MUSD amount to pre-fund the engine during the demo script. Defaults to `1e18`. |
-| `USER` | ▫️ | Alternate address to act as the demo user; defaults to the deployer wallet. |
-| `KEEPER_PAYTO` | ▫️ | Optional payout override stored in `KeeperRegistry`. |
-| `PRICE_OVERRIDE` | ▫️ | Manual oracle price when on-chain feeds are inactive. |
-| `SORTED_TROVES_ADDR` | ▫️ | Override SortedTroves address for `TroveHintDump`. Defaults to `MezoAddresses.SORTED_TROVES`. |
-| `TROVE_DUMP_LIMIT` | ▫️ | Count of troves to export via `TroveHintDump`. Defaults to `8`. |
-| `TROVE_DUMP_SKIP` | ▫️ | Number of SortedTroves entries to skip before sampling. Defaults to `0`. |
-| `TROVE_DUMP_OUT` | ▫️ | File path to write the fallback CSV (empty string = stdout only). |
-| `TROVE_DUMP_PREFIX` | ▫️ | Optional string prepended to the CSV output (handy for env files). |
+| Key                    | Required         | Description                                                                                   |
+| ---------------------- | ---------------- | --------------------------------------------------------------------------------------------- |
+| `MEZO_RPC`             | ✅               | Mezo testnet RPC URL. Used when running scripts with `--rpc-url $MEZO_RPC`.                   |
+| `DEPLOYER_PRIVATE_KEY` | ✅ (deploy/demo) | Hex-encoded private key used to sign transactions.                                            |
+| `DEPLOY_REGISTRY`      | ▫️               | When `true`, deploy `KeeperRegistry` alongside the core suite.                                |
+| `AUTHORIZERS`          | ▫️               | Comma-separated addresses granted as LiquidationEngine authorizers during deployment.         |
+| `DEMO_REDEEM_AMOUNT`   | ▫️               | Redemption amount (wei) for `TrovePilotDemo`. Defaults to `10e18`.                            |
+| `DEMO_MAX_ITER`        | ▫️               | `VaultManager` max iterations hint. Defaults to `5`.                                          |
+| `DEMO_KEEPER_FEE_BPS`  | ▫️               | Keeper fee basis points (uint16). Defaults to `100` (1%).                                     |
+| `DEMO_ENGINE_FUND`     | ▫️               | MUSD amount to pre-fund the engine during the demo script. Defaults to `1e18`.                |
+| `USER`                 | ▫️               | Alternate address to act as the demo user; defaults to the deployer wallet.                   |
+| `KEEPER_PAYTO`         | ▫️               | Optional payout override stored in `KeeperRegistry`.                                          |
+| `PRICE_OVERRIDE`       | ▫️               | Manual oracle price when on-chain feeds are inactive.                                         |
+| `SORTED_TROVES_ADDR`   | ▫️               | Override SortedTroves address for `TroveHintDump`. Defaults to `MezoAddresses.SORTED_TROVES`. |
+| `TROVE_DUMP_LIMIT`     | ▫️               | Count of troves to export via `TroveHintDump`. Defaults to `8`.                               |
+| `TROVE_DUMP_SKIP`      | ▫️               | Number of SortedTroves entries to skip before sampling. Defaults to `0`.                      |
+| `TROVE_DUMP_OUT`       | ▫️               | File path to write the fallback CSV (empty string = stdout only).                             |
+| `TROVE_DUMP_PREFIX`    | ▫️               | Optional string prepended to the CSV output (handy for env files).                            |
 
 ## Frontend (Next.js Dashboard)
 

@@ -114,7 +114,7 @@ contract MockTroveManager is ITroveManager {
         });
 
         // Simulate Mezo redemption behavior only when explicitly configured by the test.
-        // Default behavior is "record only" to keep unrelated tests (e.g., RedemptionRouter) deterministic.
+        // Default behavior is "record only" to keep unrelated tests deterministic.
         if (!redeemConfigured) return;
 
         require(address(musdToken) != address(0), "musdToken unset");

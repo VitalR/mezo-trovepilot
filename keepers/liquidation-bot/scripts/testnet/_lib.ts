@@ -189,7 +189,6 @@ export type AddressBook = {
      * Deprecated legacy name kept for older config files.
      */
     liquidationEngine?: Address;
-    redemptionRouter?: Address;
   };
 };
 
@@ -270,12 +269,6 @@ export function loadAddressBook(): AddressBook {
       ),
       liquidationEngine: json.trovePilot?.liquidationEngine
         ? requireAddress('trovePilot.liquidationEngine', json.trovePilot?.liquidationEngine)
-        : undefined,
-      redemptionRouter: json.trovePilot?.redemptionRouter
-        ? requireAddress(
-            'trovePilot.redemptionRouter',
-            json.trovePilot?.redemptionRouter
-          )
         : undefined,
     },
   };

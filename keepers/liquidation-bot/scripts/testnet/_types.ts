@@ -22,7 +22,6 @@ export type TestnetStateV1 = {
      * Kept for backwards compatibility with older state files.
      */
     liquidationEngine?: Address;
-    redemptionRouter?: Address;
   };
 
   keeper?: {

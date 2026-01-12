@@ -625,7 +625,7 @@ describe('executor gas handling and splitting', () => {
     await executeLiquidationJob({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
-      liquidationEngine: ZERO,
+      trovePilotEngine: ZERO,
       job: { borrowers: [addr(1)], fallbackOnFail: true },
       dryRun: false,
       config: {

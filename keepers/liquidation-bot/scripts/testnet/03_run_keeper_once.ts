@@ -112,9 +112,6 @@ async function main() {
     priceFeed: config.priceFeed,
     borrowerOperations: book.mezo.core.borrowerOperations,
     trovePilotEngine: config.trovePilotEngine,
-    // Backwards compatibility for older state readers:
-    liquidationEngine: config.trovePilotEngine,
-    redemptionRouter: book.trovePilot.redemptionRouter,
   };
 
   // State is optional for this script (it can run purely from config).
@@ -352,6 +349,12 @@ async function main() {
     if (!config.dryRun && strictBatch) {
       const recipient = account;
       const engine = config.trovePilotEngine;
+      if (!engine) {
+        throw new Error(
+          'STRICT_BATCH preflight requires TROVE_PILOT_ENGINE_ADDRESS (engine mode)'
+        );
+      }
+      const engineAddress = engine as Address;
       const singleEstimates: Array<{
         borrower: Address;
         ok: boolean;
@@ -361,7 +364,7 @@ async function main() {
       for (const b of requestedBorrowers) {
         try {
           const g = await publicClient.estimateContractGas({
-            address: engine,
+            address: engineAddress,
             abi: trovePilotEngineAbi,
             functionName: 'liquidateSingle',
             args: [b, recipient],
@@ -375,7 +378,7 @@ async function main() {
       const estimateBatch = async (borrowers: Address[]) => {
         try {
           const g = await publicClient.estimateContractGas({
-            address: engine,
+            address: engineAddress,
             abi: trovePilotEngineAbi,
             functionName: 'liquidateBatch',
             args: [borrowers, recipient],
@@ -475,6 +478,12 @@ async function main() {
       try {
         const recipient = account;
         const engine = config.trovePilotEngine;
+        if (!engine) {
+          throw new Error(
+            'STRICT_BATCH cap gating requires TROVE_PILOT_ENGINE_ADDRESS (engine mode)'
+          );
+        }
+        const engineAddress = engine as Address;
 
         // Should always be full-length in strict mode at this point, but keep defensive.
         if (list.length !== requestedBorrowers.length) {
@@ -506,7 +515,7 @@ async function main() {
         let rawGas: bigint;
         try {
           rawGas = await publicClient.estimateContractGas({
-            address: engine,
+            address: engineAddress,
             abi: trovePilotEngineAbi,
             functionName: 'liquidateBatch',
             args: [list, recipient],

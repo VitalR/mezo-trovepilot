@@ -17,8 +17,5 @@
       "pythOracle": "0x2880aB155794e7179c9eE2e38200202908C17B43"
     }
   },
-  "trovePilot": {
-    "liquidationEngine": "0x0bf202057A5457169aAb7Ea11916E7818DF11385",
-    "redemptionRouter": "0xba353C8774EBC4a2eD538B6917f34238b4aE02bA"
-  }
+  "trovePilot": {}
 }

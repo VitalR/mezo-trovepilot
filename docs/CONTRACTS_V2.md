@@ -27,143 +27,76 @@ They **only**:
 
 ## 2. Contract Details
 
-### 2.1 `LiquidationEngine`
+### 2.1 `TrovePilotEngine` (unified wrapper)
+
+`TrovePilotEngine` is the **only on-chain wrapper contract** retained in this repo. Legacy wrappers (`LiquidationEngine`, `RedemptionRouter`) were removed and consolidated into this single primitive.
 
 ### Purpose
 
-Batch or per-trove liquidation executor with fallback and retry logic.
+Provide a **permissionless**, **auditable** execution wrapper for:
+
+- liquidations (single + batch)
+- hinted redemptions (one-call execution using off-chain computed hints)
+
+while supporting an explicit `recipient` so operators can keep custody and route payouts/refunds deterministically.
 
 ### Key Features
 
-- `liquidateRange()` with batching + fallback
-- Records job metadata (`JobRecorded`)
-- Optional scoring via `KeeperRegistry`
-- Optional fee forwarding (native + MUSD)
-- Owner-only `sweep(token, recipient)` is an emergency escape hatch to clear dust; execution remains fully permissionless.
+- **Liquidation**:
+  - `liquidateSingle(address borrower, address recipient)`
+  - `liquidateBatch(address[] borrowers, address recipient)`
+- **Redemption**:
+  - `redeemHintedTo(uint256 musdAmount, address recipient, address firstHint, address upperHint, address lowerHint, uint256 partialNICR, uint256 maxIter)`
+  - Atomic custody: pulls MUSD from `msg.sender`, calls core redemption, then forwards native + MUSD deltas to `recipient`.
+- **Indexing**:
+  - `jobId()` monotonic counter for off-chain indexing
+- **Safety**:
+  - `Ownable2Step` gated `sweep(token, recipient)` as an emergency escape hatch only
 
 ### State
 
-- Minimal: job logs only
-- No custody of collateral or MUSD
-- No strategy logic; off-chain decides which troves to liquidate
+- Minimal:
+  - `jobId` (monotonic counter)
+  - immutable references to Mezo core (`TROVE_MANAGER`) and `MUSD`
+- No strategy logic (all strategy remains off-chain).
 
 ### Events
 
-- `JobRecorded`
-- `RewardsForwarded`
+- `TrovePilotEngineInitialized(troveManager, musd, owner)`
+- `LiquidationExecuted(jobId, caller, recipient, attempted, succeeded, nativeReward, musdReward)`
+- `RedemptionExecuted(jobId, caller, recipient, musdRequested, musdRedeemed, musdRefunded, collateralOut, maxIter, hinted)`
+- `SweepExecuted(caller, token, amount, recipient)`
 
 ---
 
-### 2.2 `RedemptionRouter`
+### 2.2 Deprecated v2 wrappers (removed)
 
-### Purpose
-
-Simplified interface for MUSD → BTC redemptions.
-
-### Modes
-
-- `redeemQuick()` — simple, no hints (higher gas)
-- `redeemExact()` — hint-assisted (cheaper)
-
-### Integrations
-
-- `HintHelpers`
-- `SortedTroves`
-- `TroveManager`
-
-### Events
-
-- `Redeemed`
-
----
-
-### 2.3 `RedemptionLoopExecutor`
-
-### Purpose
-
-Workhorse for arbitrage/redemption strategies:
-
-> swap → redeem → (optional) rebalance
-
-### Properties
-
-- Stateless
-- Slippage validated off-chain
-- Calls:
-  - DEX adapter (Tigris)
-  - RedemptionRouter
-
-### Events
-
-- Emitted via underlying calls (swap, redemption)
-
----
-
-### 2.4 `DexAdapter_Tigris`
-
-### Purpose
-
-Single-purpose DEX wrapper for swaps required in redemption loops.
-
-### Characteristics
-
-- Minimal surface
-- Permissionless
-- No pricing logic
-- No liquidity logic
-- Optional future: more adapters (`DexAdapter_Uniswap`, etc.)
+Earlier iterations included separate wrappers (`LiquidationEngine`, `RedemptionRouter`) and loop executors. Those contracts have been removed from `contracts/src/` and are intentionally not part of the maintained on-chain surface.
 
 ---
 
 ## 3. Integrations
 
-All v2 contracts integrate only with:
+`TrovePilotEngine` integrates only with:
 
-- `TroveManager`
-- `HintHelpers`
-- `SortedTroves`
-- Optional `KeeperRegistry`
-- Optional DEX
+- `TroveManager` (Mezo core)
+- `MUSD` (ERC-20)
 
-No new protocol dependencies.
+All redemption hints (`HintHelpers`, `SortedTroves`) are computed off-chain and provided by the caller.
 
 ---
 
 ## 4. Security Model
 
-- Stateless interactions
-- Clear event logs
-- No approvals stored
-- No reentrancy-sensitive interactions
-- Minimal storage = easy audits
-- Clean separation from protocol-owned logic
+- Minimal surface area and storage (`jobId` only)
+- Strict bubbling of core reverts (no hidden fallback loops on-chain)
+- Reentrancy guarded
+- Emergency `sweep` is owner-gated (`Ownable2Step`) and intended only to clear dust
 
 ---
 
-## 5. Future Extensions
+## 5. Summary Table
 
-Safe additions:
-
-- More DEX adapters
-- Wrapper for future Mezo flows
-- Batch redemptions (if supported later)
-- Simpler “job builder” helper contracts (optional)
-
-Unsafe (and therefore excluded):
-
-- Keeper incentive layer
-- Vault or yield strategies
-- Governance
-- Tokenomics
-
----
-
-## 6. Summary Table
-
-| Contract                  | State     | Responsibility       | Notes                   |
-| ------------------------- | --------- | -------------------- | ----------------------- |
-| LiquidationEngine         | Minimal   | Execute liquidations | Optional scoring & fees |
-| RedemptionRouter          | Stateless | Redemption execution | Hint helpers            |
-| RedemptionLoopExecutor    | Stateless | Swap → redeem        | Strategy is off-chain   |
-| DexAdapter_Tigris         | Stateless | Swap wrapper         | Simple, composable      |
-| KeeperRegistry (optional) | Minimal   | Score registry       | Not required            |
+| Contract         | State   | Responsibility                    | Notes                                      |
+| ---------------- | ------- | --------------------------------- | ------------------------------------------ |
+| TrovePilotEngine | Minimal | Liquidations + hinted redemptions | Canonical on-chain wrapper (only one kept) |

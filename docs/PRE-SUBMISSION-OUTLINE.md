@@ -1,6 +1,6 @@
 # [Archived] TrovePilot — Pre-Submission Outline
 
-_This pre-submission outline is kept for historical context. The up‑to‑date README and architecture live in `README.md` and `docs/ARCHITECTURE.md`. Some names (e.g., LiquidationBatcher) were superseded by `LiquidationEngine`._
+_This pre-submission outline is kept for historical context. The up‑to‑date README and architecture live in `README.md` and `docs/ARCHITECTURE.md`. Legacy wrapper names (e.g., LiquidationBatcher / LiquidationEngine / RedemptionRouter) were consolidated into the unified `TrovePilotEngine`._
 
 _Advanced DeFi Solutions – Mezo Hackathon_
 

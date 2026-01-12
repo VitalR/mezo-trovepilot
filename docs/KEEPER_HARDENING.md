@@ -1,34 +1,30 @@
-**Keeper Hardening Checklist for TrovePilot**
----
+## **Keeper Hardening Checklist for TrovePilot**
 
 ## 1. Core correctness & safety (on-chain + bot)
 
 1. **Finalize contract layer (you’re almost there):**
 
-   * LiquidationEngine:
+   - TrovePilotEngine (unified wrapper):
 
-     * Deterministic `liquidateRange(borrowers, fallbackOnFail)`.
-     * Reward forwarding (native BTC delta) to `msg.sender`.
-     * Owner-only `sweep` as emergency escape.
-   * RedemptionRouter:
-
-     * `redeemQuick` (Option A).
-     * `redeemHinted` (Option B with strict `musdAmount == truncated`).
+     - `liquidateSingle(borrower, recipient)` and `liquidateBatch(borrowers, recipient)`.
+     - `redeemHintedTo(musdAmount, recipient, firstHint, upperHint, lowerHint, partialNICR, maxIter)`.
+     - Structured events (`LiquidationExecuted`, `RedemptionExecuted`) plus monotonic `jobId`.
+     - Owner-only `sweep` as emergency escape hatch (execution remains permissionless).
 
 2. **Bot correctness (MVP):**
 
-   * Implement `getLiquidatableTroves()` using Mezo docs / SortedTroves.
-   * Implement basic `buildLiquidationJobs()` (chunking).
-   * Implement `executeLiquidationJob()` with:
+   - Implement `getLiquidatableTroves()` using Mezo docs / SortedTroves.
+   - Implement basic `buildLiquidationJobs()` (chunking).
+   - Implement `executeLiquidationJob()` with:
 
-     * `fallbackOnFail` flag wired to config.
-     * Clear logging of attempted vs succeeded.
+     - `fallbackOnFail` flag wired to config.
+     - Clear logging of attempted vs succeeded.
 
 3. **Basic guardrails:**
 
-   * `dryRun` mode (no transactions).
-   * Explicit “max borrowers per batch”, “max gas per tx” in config.
-   * Clear rejection on missing env (private key, RPC, addresses).
+   - `dryRun` mode (no transactions).
+   - Explicit “max borrowers per batch”, “max gas per tx” in config.
+   - Clear rejection on missing env (private key, RPC, addresses).
 
 ---
 
@@ -36,30 +32,32 @@
 
 4. **Structured logging (beyond console.log):**
 
-   * Add a small logger wrapper with:
+   - Add a small logger wrapper with:
 
-     * Levels: `DEBUG / INFO / WARN / ERROR`.
-     * Structured context: `{ jobId, block, attempted, succeeded }`.
-   * Make logs greppable and machine-readable.
+     - Levels: `DEBUG / INFO / WARN / ERROR`.
+     - Structured context: `{ jobId, block, attempted, succeeded }`.
+
+   - Make logs greppable and machine-readable.
 
 5. **Error handling & backoff:**
 
-   * Wrap main loop in try–catch.
-   * On RPC errors:
+   - Wrap main loop in try–catch.
+   - On RPC errors:
 
-     * exponential backoff (e.g., 2s → 4s → 8s up to a max).
-   * On transaction failure:
+     - exponential backoff (e.g., 2s → 4s → 8s up to a max).
 
-     * log reason,
-     * mark job as failed, but don’t crash the process.
+   - On transaction failure:
+
+     - log reason,
+     - mark job as failed, but don’t crash the process.
 
 6. **Health indicators:**
 
-   * Periodic “heartbeat” log every N minutes:
+   - Periodic “heartbeat” log every N minutes:
 
-     * last block processed,
-     * number of jobs attempted,
-     * last error (if any).
+     - last block processed,
+     - number of jobs attempted,
+     - last error (if any).
 
 ---
 
@@ -67,22 +65,24 @@
 
 7. **Lightweight state tracking (even just file/JSON at first):**
 
-   * Track:
+   - Track:
 
-     * last processed block,
-     * recently liquidated troves (e.g. sliding window),
-     * last successful jobId.
-   * Use this to avoid:
+     - last processed block,
+     - recently liquidated troves (e.g. sliding window),
+     - last successful jobId.
 
-     * re-sending identical jobs,
-     * hammering already-cleared troves.
+   - Use this to avoid:
+
+     - re-sending identical jobs,
+     - hammering already-cleared troves.
 
 8. **Job de-duplication:**
 
-   * When building new jobs:
+   - When building new jobs:
 
-     * filter out troves recently liquidated (using state storage).
-   * Optional: “cooldown” per trove (e.g. do not re-attempt for X blocks).
+     - filter out troves recently liquidated (using state storage).
+
+   - Optional: “cooldown” per trove (e.g. do not re-attempt for X blocks).
 
 ---
 
@@ -90,24 +90,26 @@
 
 9. **Cost / reward estimation:**
 
-   * Estimate:
+   - Estimate:
 
-     * gas cost (gas price * estimated gas),
-     * minimum liquidation reward (per Mezo docs).
-   * Skip jobs where:
+     - gas cost (gas price \* estimated gas),
+     - minimum liquidation reward (per Mezo docs).
 
-     * estimated reward < gas cost * safety factor.
+   - Skip jobs where:
+
+     - estimated reward < gas cost \* safety factor.
 
 10. **Priority ordering:**
 
-* Sort liquidatable troves by:
+- Sort liquidatable troves by:
 
-  * expected reward,
-  * risk (how far below threshold).
-* Prefer jobs with:
+  - expected reward,
+  - risk (how far below threshold).
 
-  * higher reward,
-  * lower risk of borderline-collateral.
+- Prefer jobs with:
+
+  - higher reward,
+  - lower risk of borderline-collateral.
 
 ---
 
@@ -115,20 +117,21 @@
 
 11. **Use correct price feed:**
 
-* Read price from the **same source** TroveManager uses (or as close as possible per Mezo docs).
-* Verify:
+- Read price from the **same source** TroveManager uses (or as close as possible per Mezo docs).
+- Verify:
 
-  * price freshness,
-  * no obvious anomalies (e.g. > X% jump vs previous sample).
+  - price freshness,
+  - no obvious anomalies (e.g. > X% jump vs previous sample).
 
 12. **Consistency checks:**
 
-* Before sending a job:
+- Before sending a job:
 
-  * re-check that troves are still liquidatable at the current price.
-* Abort job build if:
+  - re-check that troves are still liquidatable at the current price.
 
-  * price changed too much since discovery.
+- Abort job build if:
+
+  - price changed too much since discovery.
 
 ---
 
@@ -136,20 +139,21 @@
 
 13. **Safer key handling:**
 
-* Move from plain private key in `.env` to:
+- Move from plain private key in `.env` to:
 
-  * OS-level secrets,
-  * or a simple remote signer (e.g., a local HSM / hardware wallet integration) if possible.
+  - OS-level secrets,
+  - or a simple remote signer (e.g., a local HSM / hardware wallet integration) if possible.
 
 14. **Process supervision:**
 
-* Run bot under:
+- Run bot under:
 
-  * `pm2`, `systemd`, or Docker + restart policy.
-* Configure:
+  - `pm2`, `systemd`, or Docker + restart policy.
 
-  * resource limits (CPU, memory),
-  * restarts on crash.
+- Configure:
+
+  - resource limits (CPU, memory),
+  - restarts on crash.
 
 ---
 
@@ -157,20 +161,21 @@
 
 15. **Unit tests (bot side):**
 
-* For `getLiquidatableTroves()` (using mocks / fork).
-* For `buildLiquidationJobs()` (correct chunking).
-* For safety filters (profitability, max size).
+- For `getLiquidatableTroves()` (using mocks / fork).
+- For `buildLiquidationJobs()` (correct chunking).
+- For safety filters (profitability, max size).
 
 16. **Mainnet-fork or testnet simulation:**
 
-* Run liquidation bot on a fork:
+- Run liquidation bot on a fork:
 
-  * read actual Mezo state,
-  * simulate jobs without actually sending txs.
-* Validate:
+  - read actual Mezo state,
+  - simulate jobs without actually sending txs.
 
-  * no unexpected reverts,
-  * job sizes and gas usage are sane.
+- Validate:
+
+  - no unexpected reverts,
+  - job sizes and gas usage are sane.
 
 ---
 
@@ -178,21 +183,23 @@
 
 17. **Metrics & alerts (optional but ideal):**
 
-* Expose metrics via:
+- Expose metrics via:
 
-  * Prometheus / HTTP endpoint (jobs succeeded, failed, gas used).
-* Set up alerts for:
+  - Prometheus / HTTP endpoint (jobs succeeded, failed, gas used).
 
-  * no jobs executed for X hours,
-  * repeated tx failures,
-  * RPC outages.
+- Set up alerts for:
+
+  - no jobs executed for X hours,
+  - repeated tx failures,
+  - RPC outages.
 
 18. **Config profiles:**
 
-* Support multiple profiles:
+- Support multiple profiles:
 
-  * `dev`, `testnet`, `mezo-mainnet`.
-* Each with:
+  - `dev`, `testnet`, `mezo-mainnet`.
 
-  * specific RPCs,
-  * conservative vs aggressive strategies.
+- Each with:
+
+  - specific RPCs,
+  - conservative vs aggressive strategies.

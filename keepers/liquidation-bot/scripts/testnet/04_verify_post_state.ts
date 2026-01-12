@@ -5,7 +5,7 @@ import { sortedTrovesAbi } from '../../src/abis/sortedTrovesAbi.js';
 import type { PublicClient as KeeperPublicClient } from '../../src/clients/mezoClient.js';
 import { getCurrentPrice } from '../../src/core/price.js';
 import { MCR_ICR } from '../../src/config.js';
-import { liquidationEngineEventsAbi, troveManagerExtraAbi } from './_abis.js';
+import { trovePilotEngineEventsAbi, troveManagerExtraAbi } from './_abis.js';
 import {
   argString,
   assertTestnet,
@@ -156,7 +156,7 @@ async function main() {
         }
         try {
           const decoded = decodeEventLog({
-            abi: liquidationEngineEventsAbi,
+            abi: trovePilotEngineEventsAbi,
             data: l.data,
             topics: l.topics,
           });

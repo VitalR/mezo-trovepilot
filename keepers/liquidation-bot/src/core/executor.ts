@@ -552,10 +552,11 @@ export async function executeLiquidationJob(params: {
         !preferBatch || borrowersForTx.length === 1
           ? 'liquidateSingle'
           : 'liquidateBatch';
+
       const args =
         !preferBatch || borrowersForTx.length === 1
-          ? [borrowersForTx[0]!, recipient]
-          : [borrowersForTx, recipient];
+          ? ([borrowersForTx[0]!, recipient] as const)
+          : ([borrowersForTx, recipient] as const);
 
       const txArgs: Record<string, unknown> = {
         address: trovePilotEngine,

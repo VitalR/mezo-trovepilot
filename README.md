@@ -44,10 +44,8 @@ TrovePilot v2 follows a strict separation:
 **On-chain (execution)**
 
 - Stateless wrapper contracts
-- Batch liquidation
-- Redemption with hints
-- DEX swaps (Tigris)
-- Redemption-loop executor
+- Liquidation (single + batch) via unified wrapper
+- Redemption with hints via unified wrapper
 
 Detailed architecture:  
 [`ARCHITECTURE_V2.md`](./docs/ARCHITECTURE_V2.md)
@@ -56,12 +54,9 @@ Detailed architecture:
 
 ### On-Chain Components (v2)
 
-| Contract                 | Responsibility                         |
-| ------------------------ | -------------------------------------- |
-| `LiquidationEngine`      | Batch + fallback liquidation execution |
-| `RedemptionRouter`       | Quick-mode or hint-assisted redemption |
-| `RedemptionLoopExecutor` | swap → redeem → optional rebalance     |
-| `DexAdapter_Tigris`      | Minimal DEX wrapper for swaps          |
+| Contract           | Responsibility                               |
+| ------------------ | -------------------------------------------- |
+| `TrovePilotEngine` | Unified wrapper for liquidation + redemption |
 
 Full contract reference:  
 [`CONTRACTS_V2.md`](./docs/CONTRACTS_V2.md)

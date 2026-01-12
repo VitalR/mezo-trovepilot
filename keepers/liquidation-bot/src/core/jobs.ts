@@ -3,6 +3,13 @@ import { Address } from 'viem';
 export interface LiquidationJob {
   borrowers: Address[];
   fallbackOnFail: boolean;
+  /**
+   * If true, caller intends this job to be executed as a single batch tx when
+   * `borrowers.length > 1`. Executor should not silently downselect to a single.
+   *
+   * Note: global default can still be provided via `executeLiquidationJob({ preferBatch })`.
+   */
+  preferBatch?: boolean;
 }
 
 export function buildLiquidationJobs(params: {

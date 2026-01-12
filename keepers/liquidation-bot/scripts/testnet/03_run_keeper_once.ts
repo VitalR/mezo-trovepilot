@@ -29,6 +29,9 @@ import { TestnetStateV1 } from './_types.js';
 type CapturedEvent = Record<string, any>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
+const MAX_UINT256 = (1n << 256n) - 1n;
+// getCurrentICR() is a ratio in 1e18 units; anything astronomically large is treated as sentinel/invalid.
+const ABSURD_ICR_E18 = 1_000_000_000_000_000_000_000_000n; // 1e24
 
 function captureJsonLogs<T>(
   fn: () => Promise<T>
@@ -151,47 +154,131 @@ async function main() {
   // Deterministic multi-borrower path: FORCE_BORROWERS lets operators specify
   // the exact borrowers to attempt in one tx (batch), avoiding scan nondeterminism.
   if (forceBorrowersRaw) {
-    const borrowers = parseAddressList({
+    const requestedBorrowers = parseAddressList({
       name: 'FORCE_BORROWERS',
       raw: forceBorrowersRaw,
       allowEmpty: false,
     });
 
     // Pre-check ICRs at the current price to avoid sending known-bad txs.
-    const checked: Array<{ borrower: Address; icrE18: bigint }> = [];
-    for (const borrower of borrowers) {
+    const checked: Array<{
+      borrower: Address;
+      icrE18: bigint;
+      isSentinel: boolean;
+      isAbsurd: boolean;
+      belowMcr: boolean;
+      liquidatable: boolean;
+    }> = [];
+    for (const borrower of requestedBorrowers) {
       const icr = (await publicClient.readContract({
         address: config.troveManager,
         abi: troveManagerAbi,
         functionName: 'getCurrentICR',
         args: [borrower, price],
       })) as unknown as bigint;
-      checked.push({ borrower, icrE18: icr });
+      const isSentinel = icr === MAX_UINT256;
+      const isAbsurd = icr >= ABSURD_ICR_E18;
+      const belowMcr = !isSentinel && !isAbsurd && icr < MCR_ICR;
+      checked.push({
+        borrower,
+        icrE18: icr,
+        isSentinel,
+        isAbsurd,
+        belowMcr,
+        liquidatable: belowMcr,
+      });
     }
 
-    const liquidatable = checked
-      .filter((x) => x.icrE18 < MCR_ICR)
+    const liquidatableBorrowers = checked
+      .filter((x) => x.liquidatable)
       .map((x) => x.borrower);
 
     log.jsonInfo('testnet_force_borrowers_precheck', {
       component: 'testnet',
-      forceBorrowers: borrowers,
+      requestedBorrowers,
+      liquidatableBorrowers,
       priceE18: price.toString(),
       mcrIcrE18: MCR_ICR.toString(),
       icrs: checked.map((x) => ({
         borrower: x.borrower,
         icrE18: x.icrE18.toString(),
-        belowMcr: x.icrE18 < MCR_ICR,
+        belowMcr: x.belowMcr,
+        sentinelMaxUint256: x.isSentinel,
+        absurdIcr: x.isAbsurd,
+        liquidatable: x.liquidatable,
       })),
-      liquidatableCount: liquidatable.length,
+      liquidatableCount: liquidatableBorrowers.length,
       strictBatch,
     });
 
-    if (liquidatable.length === 0) {
+    const persistNoTx = (params: {
+      reason: string;
+      requestedBorrowers: Address[];
+      liquidatableBorrowers: Address[];
+      chosenBatchBorrowers?: Address[];
+      reasonDetails?: Record<string, unknown>;
+      icrs: Array<{
+        borrower: Address;
+        icrE18: string;
+        belowMcr: boolean;
+        sentinelMaxUint256: boolean;
+        absurdIcr: boolean;
+        liquidatable: boolean;
+      }>;
+    }) => {
+      ensureStateDir();
+      const now = Date.now();
+      const next: TestnetStateV1 = {
+        ...state,
+        updatedAtMs: now,
+        addresses: canonicalAddresses,
+        keeper: account === ZERO_ADDRESS ? state.keeper : { address: account },
+        keeperRunOnce: {
+          attemptedAtMs: now,
+          dryRun: Boolean(config.dryRun),
+          forceBorrowers: params.requestedBorrowers,
+          maxToScan: maxToScanOverride,
+          processedBorrowers: [],
+          leftoverBorrowers: params.requestedBorrowers,
+          txHash: undefined,
+          txConfirmed: false,
+          receipt: undefined,
+          balanceBeforeWei: undefined,
+          balanceAfterWei: undefined,
+          balanceDeltaWei: undefined,
+          strictBatch,
+          requestedBorrowers: params.requestedBorrowers,
+          liquidatableBorrowers: params.liquidatableBorrowers,
+          chosenBatchBorrowers: params.chosenBatchBorrowers,
+          skipReason: params.reason,
+          // Helpful structured context for operators; safe to ignore by older readers.
+          skipReasonDetails: {
+            ...(params.reasonDetails ?? {}),
+            icrs: params.icrs,
+          },
+        },
+      };
+      const { latest: latestPath } = scriptPaths();
+      const snapshot = writeStateWithHistory({
+        stateFile,
+        latestFile: latestPath,
+        snapshotPrefix: `run_once_${runId}`,
+        data: next,
+      });
+      log.jsonInfo('testnet_state_updated', {
+        component: 'testnet',
+        stateFile,
+        latest: latestPath,
+        snapshot,
+        txHash: undefined,
+      });
+    };
+
+    if (liquidatableBorrowers.length === 0) {
       log.jsonInfo('testnet_run_once_skip', {
         component: 'testnet',
         reason: 'NONE_LIQUIDATABLE',
-        forceBorrowers: borrowers,
+        requestedBorrowers,
         mcrIcrE18: MCR_ICR.toString(),
         priceE18: price.toString(),
         icrs: checked.map((x) => ({
@@ -199,11 +286,69 @@ async function main() {
           icrE18: x.icrE18.toString(),
         })),
       });
+      if (!config.dryRun) {
+        persistNoTx({
+          reason: 'NONE_LIQUIDATABLE',
+          requestedBorrowers,
+          liquidatableBorrowers,
+          icrs: checked.map((x) => ({
+            borrower: x.borrower,
+            icrE18: x.icrE18.toString(),
+            belowMcr: x.belowMcr,
+            sentinelMaxUint256: x.isSentinel,
+            absurdIcr: x.isAbsurd,
+            liquidatable: x.liquidatable,
+          })),
+        });
+      }
+      return;
+    }
+
+    // STRICT_BATCH=true + FORCE_BORROWERS: all-or-nothing gate.
+    // If ANY requested borrower is not liquidatable at current price (including sentinel/closed),
+    // exit WITHOUT SENDING ANY TX.
+    if (
+      strictBatch &&
+      liquidatableBorrowers.length !== requestedBorrowers.length
+    ) {
+      log.jsonInfo('testnet_strict_batch_skip', {
+        component: 'testnet',
+        reason: 'STRICT_BATCH_NOT_ALL_LIQUIDATABLE',
+        no_tx_sent: true,
+        requestedBorrowers,
+        liquidatableBorrowers,
+        priceE18: price.toString(),
+        mcrIcrE18: MCR_ICR.toString(),
+        icrs: checked.map((x) => ({
+          borrower: x.borrower,
+          icrE18: x.icrE18.toString(),
+          belowMcr: x.belowMcr,
+          sentinelMaxUint256: x.isSentinel,
+          absurdIcr: x.isAbsurd,
+          liquidatable: x.liquidatable,
+        })),
+      });
+      if (!config.dryRun) {
+        persistNoTx({
+          reason: 'STRICT_BATCH_NOT_ALL_LIQUIDATABLE',
+          requestedBorrowers,
+          liquidatableBorrowers,
+          icrs: checked.map((x) => ({
+            borrower: x.borrower,
+            icrE18: x.icrE18.toString(),
+            belowMcr: x.belowMcr,
+            sentinelMaxUint256: x.isSentinel,
+            absurdIcr: x.isAbsurd,
+            liquidatable: x.liquidatable,
+          })),
+        });
+      }
       return;
     }
 
     // STRICT_BATCH mode: do a best-effort preflight using eth_estimateGas against
     // the engine entrypoints to surface which borrower(s) cause reverts.
+    let chosenBatchBorrowers: Address[] | null = null;
     if (!config.dryRun && strictBatch) {
       const recipient = account;
       const engine = config.trovePilotEngine;
@@ -213,7 +358,7 @@ async function main() {
         gas?: string;
         error?: string;
       }> = [];
-      for (const b of liquidatable) {
+      for (const b of requestedBorrowers) {
         try {
           const g = await publicClient.estimateContractGas({
             address: engine,
@@ -243,19 +388,19 @@ async function main() {
       };
 
       const batchOrders: Array<{ name: string; borrowers: Address[] }> = [];
-      // As provided (after filtering to liquidatable).
-      batchOrders.push({ name: 'as_provided', borrowers: liquidatable });
+      // As provided (strict uses the full requested list).
+      batchOrders.push({ name: 'as_provided', borrowers: requestedBorrowers });
       // For 2 borrowers, explicitly try the swapped order (order can matter in some TM implementations).
-      if (liquidatable.length === 2) {
+      if (requestedBorrowers.length === 2) {
         batchOrders.push({
           name: 'reversed',
-          borrowers: [liquidatable[1]!, liquidatable[0]!],
+          borrowers: [requestedBorrowers[1]!, requestedBorrowers[0]!],
         });
       }
       // Also try ICR-sorted orders (best-effort; uses the same ICR values already fetched above).
       const icrMap = new Map<Address, bigint>();
       for (const x of checked) icrMap.set(x.borrower, x.icrE18);
-      const byIcrAsc = [...liquidatable].sort((a, b) => {
+      const byIcrAsc = [...requestedBorrowers].sort((a, b) => {
         const ia = icrMap.get(a) ?? 0n;
         const ib = icrMap.get(b) ?? 0n;
         return ia < ib ? -1 : ia > ib ? 1 : 0;
@@ -289,9 +434,289 @@ async function main() {
         singles: singleEstimates,
         batchCandidates: batchEstimates,
       });
+
+      if (!firstOk) {
+        log.jsonInfo('testnet_strict_batch_skip', {
+          component: 'testnet',
+          reason: 'STRICT_BATCH_NO_BATCH_ORDER_ESTIMATES',
+          no_tx_sent: true,
+          requestedBorrowers,
+          priceE18: price.toString(),
+          mcrIcrE18: MCR_ICR.toString(),
+          singles: singleEstimates,
+          batchCandidates: batchEstimates,
+        });
+        persistNoTx({
+          reason: 'STRICT_BATCH_NO_BATCH_ORDER_ESTIMATES',
+          requestedBorrowers,
+          liquidatableBorrowers,
+          icrs: checked.map((x) => ({
+            borrower: x.borrower,
+            icrE18: x.icrE18.toString(),
+            belowMcr: x.belowMcr,
+            sentinelMaxUint256: x.isSentinel,
+            absurdIcr: x.isAbsurd,
+            liquidatable: x.liquidatable,
+          })),
+        });
+        return;
+      }
+
+      // Prefer as_provided if it works; otherwise pick first working candidate (already logged above).
+      const asProvidedOk = batchEstimates.find(
+        (b) => b.ok && b.name === 'as_provided'
+      );
+      chosenBatchBorrowers = (asProvidedOk ?? firstOk).borrowers as Address[];
     }
 
-    const job = { borrowers: liquidatable, fallbackOnFail: !strictBatch };
+    // STRICT mode cap gating: align with executor caps so strict outcomes are deterministic and no-tx.
+    if (!config.dryRun && strictBatch) {
+      const list = chosenBatchBorrowers ?? requestedBorrowers;
+      try {
+        const recipient = account;
+        const engine = config.trovePilotEngine;
+
+        // Should always be full-length in strict mode at this point, but keep defensive.
+        if (list.length !== requestedBorrowers.length) {
+          log.jsonInfo('testnet_strict_batch_skip', {
+            component: 'testnet',
+            reason: 'STRICT_BATCH_INTERNAL_INCONSISTENCY',
+            no_tx_sent: true,
+            requestedBorrowers,
+            chosenBatchBorrowers: list,
+          });
+          persistNoTx({
+            reason: 'STRICT_BATCH_INTERNAL_INCONSISTENCY',
+            requestedBorrowers,
+            liquidatableBorrowers,
+            chosenBatchBorrowers: list,
+            icrs: checked.map((x) => ({
+              borrower: x.borrower,
+              icrE18: x.icrE18.toString(),
+              belowMcr: x.belowMcr,
+              sentinelMaxUint256: x.isSentinel,
+              absurdIcr: x.isAbsurd,
+              liquidatable: x.liquidatable,
+            })),
+          });
+          return;
+        }
+
+        // Re-estimate the exact batch call and apply the same buffer as executor.
+        let rawGas: bigint;
+        try {
+          rawGas = await publicClient.estimateContractGas({
+            address: engine,
+            abi: trovePilotEngineAbi,
+            functionName: 'liquidateBatch',
+            args: [list, recipient],
+            account: recipient,
+          });
+        } catch (err) {
+          log.jsonInfo('testnet_strict_batch_skip', {
+            component: 'testnet',
+            reason: 'STRICT_BATCH_BATCH_REESTIMATE_REVERT',
+            no_tx_sent: true,
+            requestedBorrowers,
+            chosenBatchBorrowers: list,
+            error: String(err),
+          });
+          persistNoTx({
+            reason: 'STRICT_BATCH_BATCH_REESTIMATE_REVERT',
+            requestedBorrowers,
+            liquidatableBorrowers,
+            chosenBatchBorrowers: list,
+            reasonDetails: { error: String(err) },
+            icrs: checked.map((x) => ({
+              borrower: x.borrower,
+              icrE18: x.icrE18.toString(),
+              belowMcr: x.belowMcr,
+              sentinelMaxUint256: x.isSentinel,
+              absurdIcr: x.isAbsurd,
+              liquidatable: x.liquidatable,
+            })),
+          });
+          return;
+        }
+
+        const gasBuffered =
+          (rawGas * BigInt(100 + (config.gasBufferPct ?? 0))) / 100n;
+
+        if (config.maxGasPerJob !== undefined && config.maxGasPerJob > 0n) {
+          if (gasBuffered > config.maxGasPerJob) {
+            log.jsonInfo('testnet_strict_batch_skip', {
+              component: 'testnet',
+              reason: 'STRICT_BATCH_GAS_CAP',
+              no_tx_sent: true,
+              requestedBorrowers,
+              chosenBatchBorrowers: list,
+              gasEstimateRaw: rawGas.toString(),
+              gasBuffered: gasBuffered.toString(),
+              maxGasPerJob: config.maxGasPerJob.toString(),
+            });
+            persistNoTx({
+              reason: 'STRICT_BATCH_GAS_CAP',
+              requestedBorrowers,
+              liquidatableBorrowers,
+              chosenBatchBorrowers: list,
+              reasonDetails: {
+                gasEstimateRaw: rawGas.toString(),
+                gasBuffered: gasBuffered.toString(),
+                maxGasPerJob: config.maxGasPerJob.toString(),
+              },
+              icrs: checked.map((x) => ({
+                borrower: x.borrower,
+                icrE18: x.icrE18.toString(),
+                belowMcr: x.belowMcr,
+                sentinelMaxUint256: x.isSentinel,
+                absurdIcr: x.isAbsurd,
+                liquidatable: x.liquidatable,
+              })),
+            });
+            return;
+          }
+        }
+
+        const maxSpend = config.maxNativeSpentPerRun;
+        if (maxSpend !== undefined && maxSpend > 0n) {
+          // Resolve a fee-per-gas for spend projection.
+          // Precedence aligns with executor:
+          // 1) config.maxFeePerGas (if set)
+          // 2) estimateFeesPerGas().maxFeePerGas
+          // 3) getGasPrice()
+          let feePerGas: bigint | undefined;
+          let feeSource:
+            | 'config'
+            | 'estimateFeesPerGas'
+            | 'getGasPrice'
+            | 'unknown' = 'unknown';
+          if (config.maxFeePerGas !== undefined) {
+            feePerGas = config.maxFeePerGas;
+            feeSource = 'config';
+          } else {
+            try {
+              const fees = await publicClient.estimateFeesPerGas();
+              if (fees.maxFeePerGas !== undefined) {
+                feePerGas = fees.maxFeePerGas;
+                feeSource = 'estimateFeesPerGas';
+              }
+            } catch {
+              // ignore
+            }
+            if (feePerGas === undefined) {
+              try {
+                feePerGas = await publicClient.getGasPrice();
+                feeSource = 'getGasPrice';
+              } catch {
+                // ignore
+              }
+            }
+          }
+          if (feePerGas === undefined) {
+            log.jsonInfo('testnet_strict_batch_skip', {
+              component: 'testnet',
+              reason: 'STRICT_BATCH_FEE_UNAVAILABLE',
+              no_tx_sent: true,
+              requestedBorrowers,
+              chosenBatchBorrowers: list,
+              maxNativeSpentPerRun: maxSpend.toString(),
+            });
+            persistNoTx({
+              reason: 'STRICT_BATCH_FEE_UNAVAILABLE',
+              requestedBorrowers,
+              liquidatableBorrowers,
+              chosenBatchBorrowers: list,
+              reasonDetails: {
+                maxNativeSpentPerRun: maxSpend.toString(),
+                feeSource,
+              },
+              icrs: checked.map((x) => ({
+                borrower: x.borrower,
+                icrE18: x.icrE18.toString(),
+                belowMcr: x.belowMcr,
+                sentinelMaxUint256: x.isSentinel,
+                absurdIcr: x.isAbsurd,
+                liquidatable: x.liquidatable,
+              })),
+            });
+            return;
+          }
+
+          const projected = gasBuffered * feePerGas;
+          if (projected > maxSpend) {
+            log.jsonInfo('testnet_strict_batch_skip', {
+              component: 'testnet',
+              reason: 'STRICT_BATCH_SPEND_CAP',
+              no_tx_sent: true,
+              requestedBorrowers,
+              chosenBatchBorrowers: list,
+              gasBuffered: gasBuffered.toString(),
+              feePerGas: feePerGas.toString(),
+              projectedSpend: projected.toString(),
+              maxNativeSpentPerRun: maxSpend.toString(),
+            });
+            persistNoTx({
+              reason: 'STRICT_BATCH_SPEND_CAP',
+              requestedBorrowers,
+              liquidatableBorrowers,
+              chosenBatchBorrowers: list,
+              reasonDetails: {
+                gasBuffered: gasBuffered.toString(),
+                feePerGas: feePerGas.toString(),
+                feeSource,
+                projectedSpend: projected.toString(),
+                maxNativeSpentPerRun: maxSpend.toString(),
+              },
+              icrs: checked.map((x) => ({
+                borrower: x.borrower,
+                icrE18: x.icrE18.toString(),
+                belowMcr: x.belowMcr,
+                sentinelMaxUint256: x.isSentinel,
+                absurdIcr: x.isAbsurd,
+                liquidatable: x.liquidatable,
+              })),
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        // Fail closed: strict mode should never crash due to cap-gating errors.
+        log.jsonInfo('testnet_strict_batch_skip', {
+          component: 'testnet',
+          reason: 'STRICT_BATCH_CAP_GATING_ERROR',
+          no_tx_sent: true,
+          requestedBorrowers,
+          chosenBatchBorrowers: list,
+          error: String(err),
+        });
+        persistNoTx({
+          reason: 'STRICT_BATCH_CAP_GATING_ERROR',
+          requestedBorrowers,
+          liquidatableBorrowers,
+          chosenBatchBorrowers: list,
+          reasonDetails: { error: String(err) },
+          icrs: checked.map((x) => ({
+            borrower: x.borrower,
+            icrE18: x.icrE18.toString(),
+            belowMcr: x.belowMcr,
+            sentinelMaxUint256: x.isSentinel,
+            absurdIcr: x.isAbsurd,
+            liquidatable: x.liquidatable,
+          })),
+        });
+        return;
+      }
+    }
+
+    const borrowersForExecution =
+      strictBatch && chosenBatchBorrowers
+        ? chosenBatchBorrowers
+        : liquidatableBorrowers;
+    const job = {
+      borrowers: borrowersForExecution,
+      fallbackOnFail: !strictBatch,
+      preferBatch: strictBatch && borrowersForExecution.length > 1,
+    };
     const balBefore =
       account === ZERO_ADDRESS
         ? 0n
@@ -304,6 +729,7 @@ async function main() {
         trovePilotEngine: config.trovePilotEngine,
         job,
         dryRun: config.dryRun,
+        preferBatch: strictBatch && borrowersForExecution.length > 1,
         config: {
           maxTxRetries: config.maxTxRetries,
           maxFeePerGas: config.maxFeePerGas,
@@ -316,12 +742,64 @@ async function main() {
       });
     });
     if (!config.dryRun && strictBatch) {
-      // In strict mode we require the executor to submit exactly one batch covering all
-      // intended borrowers. If estimation reverts (or the job is shrunk), fail loudly.
-      if (execRes.processedBorrowers.length !== liquidatable.length) {
+      const txConfirmed = events.find(
+        (e) => e.event === 'tx_confirmed' && typeof e.hash === 'string'
+      );
+      const txSent = events.find(
+        (e) => e.event === 'tx_sent' && typeof e.hash === 'string'
+      );
+      const txWasSent = Boolean(txSent || txConfirmed);
+
+      // If no tx was sent, strict mode should treat this as a clean skip and persist a no-tx snapshot.
+      if (!txWasSent) {
+        // Attempt to derive a stable reason from executor logs.
+        const jobSkip = events.find((e) => e.event === 'job_skip');
+        const planErr = events.find((e) => e.event === 'job_plan_error');
+        const derived =
+          typeof jobSkip?.reason === 'string'
+            ? `STRICT_BATCH_EXECUTOR_SKIP_${jobSkip.reason}`
+            : typeof planErr?.reason === 'string'
+            ? `STRICT_BATCH_EXECUTOR_PLAN_${planErr.reason}`
+            : 'STRICT_BATCH_EXECUTOR_PLAN_FAILED';
+
+        log.jsonInfo('testnet_strict_batch_skip', {
+          component: 'testnet',
+          reason: derived,
+          no_tx_sent: true,
+          requestedBorrowers,
+          liquidatableBorrowers,
+          chosenBatchBorrowers: chosenBatchBorrowers ?? undefined,
+          executor: {
+            processedBorrowers: execRes.processedBorrowers,
+            leftoverBorrowers: execRes.leftoverBorrowers,
+          },
+        });
+        persistNoTx({
+          reason: derived,
+          requestedBorrowers,
+          liquidatableBorrowers,
+          chosenBatchBorrowers: chosenBatchBorrowers ?? undefined,
+          reasonDetails: {
+            job_skip: jobSkip ?? undefined,
+            job_plan_error: planErr ?? undefined,
+          },
+          icrs: checked.map((x) => ({
+            borrower: x.borrower,
+            icrE18: x.icrE18.toString(),
+            belowMcr: x.belowMcr,
+            sentinelMaxUint256: x.isSentinel,
+            absurdIcr: x.isAbsurd,
+            liquidatable: x.liquidatable,
+          })),
+        });
+        return;
+      }
+
+      // Tx was sent: strict invariants must hold, otherwise this is an unexpected/fatal condition.
+      const strictExpected = requestedBorrowers.length;
+      if (execRes.processedBorrowers.length !== strictExpected) {
         throw new Error(
-          `STRICT_BATCH=true: batch liquidation not executed for full set (expected=${liquidatable.length}, processed=${execRes.processedBorrowers.length}). ` +
-            `This usually means TroveManager.batchLiquidateTroves() would revert (e.g. price moved, a trove is no longer liquidatable, or batch ordering constraints).`
+          `STRICT_BATCH=true: tx sent but full strict set not processed (expected=${strictExpected}, processed=${execRes.processedBorrowers.length}).`
         );
       }
     }
@@ -365,7 +843,7 @@ async function main() {
       keeperRunOnce: {
         attemptedAtMs: now,
         dryRun: Boolean(config.dryRun),
-        forceBorrowers: borrowers,
+        forceBorrowers: requestedBorrowers,
         maxToScan: maxToScanOverride,
         processedBorrowers: execRes.processedBorrowers,
         leftoverBorrowers: execRes.leftoverBorrowers,
@@ -378,6 +856,10 @@ async function main() {
           account === ZERO_ADDRESS ? undefined : balAfter.toString(),
         balanceDeltaWei:
           account === ZERO_ADDRESS ? undefined : delta.toString(),
+        strictBatch,
+        requestedBorrowers,
+        liquidatableBorrowers,
+        chosenBatchBorrowers: chosenBatchBorrowers ?? undefined,
       },
     };
     const { latest: latestPath } = scriptPaths();

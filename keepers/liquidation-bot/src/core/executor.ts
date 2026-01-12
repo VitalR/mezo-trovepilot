@@ -74,7 +74,8 @@ export async function executeLiquidationJob(params: {
 }): Promise<ExecuteResult> {
   const { publicClient, walletClient, trovePilotEngine, job, dryRun, config } =
     params;
-  const preferBatch = params.preferBatch ?? false;
+  const preferBatch = params.preferBatch ?? job.preferBatch ?? false;
+  const maxRetries = config.maxTxRetries ?? 0;
   const spendTracker = params.spendTracker ?? { spent: 0n };
   const walletAccount: Account | Address | null = walletClient.account ?? null;
   const fromAddress: Address | undefined =
@@ -222,17 +223,22 @@ export async function executeLiquidationJob(params: {
 
     try {
       const fees = await publicClient.estimateFeesPerGas();
-      const priorityFee = fees.maxPriorityFeePerGas ?? 0n;
-      const priorityKnown = fees.maxPriorityFeePerGas !== undefined;
-      return {
-        mode: 'eip1559',
-        source: 'estimateFeesPerGas',
-        maxFeePerGas: fees.maxFeePerGas,
-        maxPriorityFeePerGas: priorityFee,
-        prioritySource: 'estimateFeesPerGas',
-        priorityKnown,
-        known: true,
-      };
+      // Some chains return undefined maxFeePerGas; fail over to legacy getGasPrice so
+      // spend caps can still be enforced deterministically.
+      if (fees.maxFeePerGas !== undefined) {
+        const priorityFee = fees.maxPriorityFeePerGas ?? 0n;
+        const priorityKnown = fees.maxPriorityFeePerGas !== undefined;
+        return {
+          mode: 'eip1559',
+          source: 'estimateFeesPerGas',
+          maxFeePerGas: fees.maxFeePerGas,
+          maxPriorityFeePerGas: priorityFee,
+          prioritySource: 'estimateFeesPerGas',
+          priorityKnown,
+          known: true,
+        };
+      }
+      // fall through to legacy below
     } catch {
       // fall through
     }
@@ -333,45 +339,62 @@ export async function executeLiquidationJob(params: {
     let gasEstimate = applyBuffer(rawGas);
 
     if (config.maxGasPerJob !== undefined && config.maxGasPerJob > 0n) {
-      while (workingCountLocal > 1 && gasEstimate > config.maxGasPerJob) {
-        const before = workingCountLocal;
-        workingCountLocal = Math.max(1, Math.ceil(workingCountLocal / 2));
-        borrowers = originalBorrowers.slice(0, workingCountLocal);
-        try {
-          rawGas = await estimate(borrowers);
-        } catch (err) {
-          const classified = classifyError(err);
-          emitJson('job_plan_error', {
-            reason: 'ESTIMATE_REVERT',
-            message: classified.message,
-            errorType: classified.type,
+      // Strict batch mode: caller expects the full list to be executed in one tx.
+      // Do not silently downselect/shrink; fail the plan instead.
+      const strictBatch = preferBatch && !job.fallbackOnFail;
+      if (strictBatch && originalBorrowers.length > 1) {
+        if (gasEstimate > config.maxGasPerJob) {
+          emitJson('job_skip', {
+            reason: 'GAS_CAP',
+            gasEstimate: gasEstimate.toString(),
+            maxGasPerJob: config.maxGasPerJob.toString(),
             borrowersTotal: originalBorrowers.length,
-            attemptedCount: workingCountLocal,
-            borrowers: borrowers,
-            fallbackEnabled: job.fallbackOnFail,
+            preferBatch: true,
+            strictBatch: true,
           });
-          // If fallback is enabled, keep shrinking until we can estimate or hit 1.
-          if (job.fallbackOnFail && workingCountLocal > 1) {
-            continue;
-          }
-          return { ok: false, reason: 'ESTIMATE_REVERT' };
+          return { ok: false, reason: 'GAS_CAP' };
         }
-        gasEstimate = applyBuffer(rawGas);
-        emitJson('job_shrink', {
-          beforeCount: before,
-          afterCount: workingCountLocal,
-          reason: 'GAS_CAP',
-          maxGasPerJob: config.maxGasPerJob.toString(),
-        });
-      }
-      if (gasEstimate > config.maxGasPerJob) {
-        emitJson('job_skip', {
-          reason: 'GAS_CAP',
-          gasEstimate: gasEstimate.toString(),
-          maxGasPerJob: config.maxGasPerJob.toString(),
-          borrowersTotal: originalBorrowers.length,
-        });
-        return { ok: false, reason: 'GAS_CAP' };
+      } else {
+        while (workingCountLocal > 1 && gasEstimate > config.maxGasPerJob) {
+          const before = workingCountLocal;
+          workingCountLocal = Math.max(1, Math.ceil(workingCountLocal / 2));
+          borrowers = originalBorrowers.slice(0, workingCountLocal);
+          try {
+            rawGas = await estimate(borrowers);
+          } catch (err) {
+            const classified = classifyError(err);
+            emitJson('job_plan_error', {
+              reason: 'ESTIMATE_REVERT',
+              message: classified.message,
+              errorType: classified.type,
+              borrowersTotal: originalBorrowers.length,
+              attemptedCount: workingCountLocal,
+              borrowers: borrowers,
+              fallbackEnabled: job.fallbackOnFail,
+            });
+            // If fallback is enabled, keep shrinking until we can estimate or hit 1.
+            if (job.fallbackOnFail && workingCountLocal > 1) {
+              continue;
+            }
+            return { ok: false, reason: 'ESTIMATE_REVERT' };
+          }
+          gasEstimate = applyBuffer(rawGas);
+          emitJson('job_shrink', {
+            beforeCount: before,
+            afterCount: workingCountLocal,
+            reason: 'GAS_CAP',
+            maxGasPerJob: config.maxGasPerJob.toString(),
+          });
+        }
+        if (gasEstimate > config.maxGasPerJob) {
+          emitJson('job_skip', {
+            reason: 'GAS_CAP',
+            gasEstimate: gasEstimate.toString(),
+            maxGasPerJob: config.maxGasPerJob.toString(),
+            borrowersTotal: originalBorrowers.length,
+          });
+          return { ok: false, reason: 'GAS_CAP' };
+        }
       }
     }
 
@@ -381,7 +404,11 @@ export async function executeLiquidationJob(params: {
         : fee.mode === 'legacy'
         ? fee.gasPrice
         : undefined;
-    if (config.maxNativeSpentPerRun !== undefined && !fee.known) {
+    // Spend cap is only enforced when > 0n; normalize to 0n so TS/logic stays simple.
+    const spendCap = config.maxNativeSpentPerRun ?? 0n;
+    const spendCapEnabled = spendCap > 0n;
+    // If spend caps are enabled, we must be able to compute a fee-per-gas.
+    if (spendCapEnabled && feePerGas === undefined) {
       emitJson('job_skip', {
         reason: 'FEE_UNAVAILABLE',
         borrowersTotal: originalBorrowers.length,
@@ -397,14 +424,14 @@ export async function executeLiquidationJob(params: {
     const estimatedCost =
       feePerGas !== undefined ? gasEstimate * feePerGas : undefined;
     if (
-      config.maxNativeSpentPerRun !== undefined &&
+      spendCapEnabled &&
       estimatedCost !== undefined &&
-      currentSpend + estimatedCost > config.maxNativeSpentPerRun
+      currentSpend + estimatedCost > spendCap
     ) {
       emitJson('job_skip', {
         reason: 'SPEND_CAP',
         projectedSpend: (currentSpend + estimatedCost).toString(),
-        cap: config.maxNativeSpentPerRun.toString(),
+        cap: spendCap.toString(),
         borrowersTotal: originalBorrowers.length,
         fee: buildFeeFields(fee),
       });
@@ -486,7 +513,7 @@ export async function executeLiquidationJob(params: {
   let lastClassified:
     | { type: ReturnType<typeof classifyError>['type']; message: string }
     | undefined;
-  while (attempt <= config.maxTxRetries) {
+  while (attempt <= maxRetries) {
     try {
       if (attempt > 0) {
         const nextBackoffMs = computeBackoffMs(attempt);
@@ -607,7 +634,7 @@ export async function executeLiquidationJob(params: {
       };
     } catch (err) {
       lastErr = err;
-      const isLast = attempt === config.maxTxRetries;
+      const isLast = attempt === maxRetries;
       const classified = classifyError(err);
       lastClassified = classified;
 
@@ -617,9 +644,7 @@ export async function executeLiquidationJob(params: {
         replanPerformed: attempt === 1,
         message: classified.message,
         nextBackoffMs:
-          attempt < config.maxTxRetries
-            ? computeBackoffMs(attempt + 1)
-            : undefined,
+          attempt < maxRetries ? computeBackoffMs(attempt + 1) : undefined,
       });
 
       if (classified.type === 'logic') {
@@ -630,7 +655,7 @@ export async function executeLiquidationJob(params: {
     attempt++;
   }
 
-  log.error(`Job failed after ${config.maxTxRetries + 1} attempts`);
+  log.error(`Job failed after ${maxRetries + 1} attempts`);
   if (lastErr) log.error(String(lastErr));
   return {
     processedBorrowers: [],

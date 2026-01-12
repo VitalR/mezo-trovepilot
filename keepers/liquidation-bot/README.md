@@ -97,9 +97,18 @@ For scripts that **send transactions** (`01_open...`, `03_run_keeper_once`), als
 
 #### Commands
 
-Open a small trove near MCR (default DRY_RUN):
+Open a small trove near MCR (recommended: manual via UI; scripts also available):
+
+UI: [Mezo testnet borrow UI](https://testnet.mezo.org/borrow)
 
 ```
+# Manual (recommended): open a “weak” trove via the UI so it can be liquidated
+#
+# Target parameters:
+# - Collateralization ratio as low as possible (e.g. ~110.1%)
+# - Loan debt at least 1800 MUSD (so it shows up meaningfully in scans/tests)
+
+# Optional (scripted) open-trove helper:
 npm run testnet:open
 CONFIRM=true DRY_RUN=false npm run testnet:open -- --COLLATERAL_BTC=0.03 --TARGET_ICR=1.102
 ```
@@ -109,20 +118,35 @@ Notes:
 - `01_open_trove_near_mcr.ts` enforces a **minimum collateral** of `0.03 BTC` by default.
 - `01_open_trove_near_mcr.ts` uses Mezo’s `BorrowerOperations.openTrove(uint256 debtAmount, address upperHint, address lowerHint)` ABI (see explorer link above). If it changes, update `scripts/testnet/_abis.ts`.
 
-Poll until liquidatable:
+Monitor / scan until liquidatable (recommended):
 
 ```
-npm run testnet:poll
-npm run testnet:poll -- --STATE_FILE=scripts/testnet/.state/latest.json --POLL_INTERVAL_SEC=15 --TIMEOUT_SEC=7200
+npm run testnet:scan -- --THRESHOLD_PCT=110 --MAX_TO_SCAN=500 --TOP=50 --STOP_AFTER_FIRST_ABOVE=false
 ```
 
-Run keeper logic once:
+Liquidate single (force one borrower):
 
 ```
+MEZO_RPC_URL=https://rpc.test.mezo.org \
+CONFIG_PATH=../../configs/addresses.testnet.json \
+NETWORK=testnet \
+DRY_RUN=false \
+CONFIRM=true \
+FORCE_BORROWER=0xcC7d7D810132c44061d99928AA6e4D63c7c693c7 \
 npm run testnet:run-once
-CONFIRM=true DRY_RUN=false npm run testnet:run-once
-npm run testnet:run-once -- --FORCE_BORROWER=0x...
-npm run testnet:run-once -- --MAX_TO_SCAN=2000
+```
+
+Liquidate batch (force a specific set; strict mode):
+
+```
+MEZO_RPC_URL=https://rpc.test.mezo.org \
+CONFIG_PATH=../../configs/addresses.testnet.json \
+NETWORK=testnet \
+DRY_RUN=false \
+CONFIRM=true \
+STRICT_BATCH=true \
+FORCE_BORROWERS=0xcC7d7D810132c44061d99928AA6e4D63c7c693c7,0x9fD12be3448d73c4eF4B0ae189E090c4FD83C9A1 \
+npm run testnet:run-once
 ```
 
 Verify post-state:

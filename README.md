@@ -1,7 +1,6 @@
 # TrovePilot v2 — Mezo Keeper Execution Toolkit
 
-**Version:** December 2025  
-**Status:** Active Development (v2)
+**Version:** December 2025
 
 TrovePilot v2 is a lightweight, permissionless execution toolkit designed to help community keepers interact safely and efficiently with **Mezo’s liquidation and redemption flows**.
 
@@ -61,6 +60,9 @@ Detailed architecture:
 Full contract reference:  
 [`CONTRACTS_V2.md`](./docs/CONTRACTS_V2.md)
 
+Testnet deployment (Mezo Explorer):  
+[`TrovePilotEngine` at `0x878a85eaaF24902fD6985d3CB2D51a299E33F43c`](https://explorer.test.mezo.org/address/0x878a85eaaF24902fD6985d3CB2D51a299E33F43c)
+
 ---
 
 ### Off-Chain Components (v2)
@@ -72,6 +74,10 @@ Full contract reference:
   - redemption-loop bot
 - Monitoring / profitability scripts
 - Optional dashboard (analytics, job history)
+
+Keeper runbooks:
+- [`keepers/liquidation-bot/README.md`](./keepers/liquidation-bot/README.md)
+- [`keepers/redemption-bot/README.md`](./keepers/redemption-bot/README.md)
 
 ---
 
@@ -91,7 +97,7 @@ Migrating from hackathon v1 to v2:
 
 ### Build
 
-constacts:
+contracts:
 
 ```
 forge install

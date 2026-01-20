@@ -132,7 +132,8 @@ CONFIG_PATH=../../configs/addresses.testnet.json \
 NETWORK=testnet \
 DRY_RUN=false \
 CONFIRM=true \
-FORCE_BORROWER=0xcC7d7D810132c44061d99928AA6e4D63c7c693c7 \
+# Replace with a liquidatable borrower address
+FORCE_BORROWER=0x1111111111111111111111111111111111111111 \
 npm run testnet:run-once
 ```
 
@@ -145,7 +146,8 @@ NETWORK=testnet \
 DRY_RUN=false \
 CONFIRM=true \
 STRICT_BATCH=true \
-FORCE_BORROWERS=0xcC7d7D810132c44061d99928AA6e4D63c7c693c7,0x9fD12be3448d73c4eF4B0ae189E090c4FD83C9A1 \
+# Replace with liquidatable borrower addresses
+FORCE_BORROWERS=0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222 \
 npm run testnet:run-once
 ```
 

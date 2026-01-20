@@ -1,0 +1,35 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+fs_permissions = [
+    { access = "read", path = "../broadcast" },
+    { access = "read", path = "../configs" },
+    { access = "write", path = "../configs" }
+]
+
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 1000
+
+chain_id = 31611
+eth_rpc_url = "https://rpc.test.mezo.org"
+evm_version = "london"
+
+remappings = [
+  "@forge-std/=lib/forge-std/src/",
+  "ds-test/=lib/forge-std/lib/ds-test/src/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+]
+
+[fmt]
+exclude=["lib", "./lib"]
+tab_width = 4
+line_length = 120
+bracket_spacing = true
+int_types = "long"
+quote_style = "double"
+wrap_comments = true
+number_underscore = "thousands"
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

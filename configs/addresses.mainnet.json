@@ -1,0 +1,21 @@
+{
+  "chainId": 31612,
+  "network": "mezo-mainnet",
+  "mezo": {
+    "core": {
+      "troveManager": "0x94AfB503dBca74aC3E4929BACEeDfCe19B93c193",
+      "hintHelpers": "0xD267b3bE2514375A075fd03C3D9CBa6b95317DC3",
+      "sortedTroves": "0x8C5DB4C62BF29c1C4564390d10c20a47E0b2749f",
+      "borrowerOperations": "0x44b1bac67dDA612a41a58AAf779143B181dEe031"
+    },
+    "tokens": {
+      "musd": "0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186"
+    },
+    "price": {
+      "priceFeed": "0x7b7c000000000000000000000000000000000015",
+      "skipOracle": "0x7b7c000000000000000000000000000000000015",
+      "pythOracle": "0x2880aB155794e7179c9eE2e38200202908C17B43"
+    }
+  },
+  "trovePilot": {}
+}

@@ -1,6 +1,6 @@
 # [Archived] TrovePilot — Pre-Submission Outline
 
-_This pre-submission outline is kept for historical context. The up‑to‑date README and architecture live in `README.md` and `docs/ARCHITECTURE.md`. Some names (e.g., LiquidationBatcher) were superseded by `LiquidationEngine`._
+_This pre-submission outline is kept for historical context. The up‑to‑date README and architecture live in `README.md` and `docs/ARCHITECTURE.md`. Legacy wrapper names (e.g., LiquidationBatcher / LiquidationEngine / RedemptionRouter) were consolidated into the unified `TrovePilotEngine`._
 
 _Advanced DeFi Solutions – Mezo Hackathon_
 
@@ -20,7 +20,7 @@ All modules are **Mezo-native**, **permissionless**, and **auditable**. No user 
 
 ## 3) Architecture (MVP)
 
-User/Bot ──calls────► LiquidationBatcher ──► TroveManager.batchLiquidate / liquidate
+User/Bot ──calls────► LiquidationBatcher ──► TroveManager.batchLiquidateTroves / liquidate
 │ │
 │ └─► forwards native + MUSD rewards to caller (minus fee)
 │
@@ -60,7 +60,7 @@ Network: **Mezo Testnet** (Chain ID 31611, RPC `https://rpc.test.mezo.org`)
 
 ## 7) Judging Alignment
 
-- **Mezo Integration (30%)** – Calls `batchLiquidate`/`liquidate` and `redeemCollateral` with hints; forwards rewards as per protocol.
+- **Mezo Integration (30%)** – Calls `batchLiquidateTroves`/`liquidate` and `redeemCollateral` with hints; forwards rewards as per protocol.
 - **Technical (30%)** – Gas-aware batching, fail-soft loops, immutable router, typed mapping keys, NatSpec, tests.
 - **Business (20%)** – Clear incentives (keeper rewards, optional protocol fee, open marketplace).
 - **UX (10%)** – One-click batch/redemption; scoreboard.

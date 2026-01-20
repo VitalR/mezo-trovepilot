@@ -1,0 +1,37 @@
+export const sortedTrovesAbi = [
+  {
+    type: 'function',
+    name: 'getSize',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'getFirst',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getNext',
+    stateMutability: 'view',
+    inputs: [{ name: '_id', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getLast',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'getPrev',
+    stateMutability: 'view',
+    inputs: [{ name: '_id', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const;

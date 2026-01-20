@@ -1,4 +1,4 @@
-# TrovePilot Architecture
+#  [Archived] TrovePilot Architecture
 
 This document provides a high-level view of the components and the two primary flows demonstrated in the hackathon UI.
 
